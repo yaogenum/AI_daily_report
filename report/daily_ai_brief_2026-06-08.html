@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>AI 研究日报（2026-06-08）</title>
+  <style>
+    :root {
+      --rainbow: linear-gradient(120deg, #ff7eb3, #ffbf7e, #7cf7bf, #79d9ff, #7b9dff, #d88bff);
+      --ink: #1f2937;
+      --subtle: #64748b;
+      --line: #e2e8f0;
+      --card-bg: #ffffff;
+      --card-border: #dbeafe;
+      --chip: #eef2ff;
+      --chip-active: #dbeafe;
+      --shadow-soft: 0 10px 26px rgba(15, 23, 42, 0.09);
+    }
+    body {
+      font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 6% 12%, rgba(255, 211, 231, 0.45), transparent 36%),
+        radial-gradient(circle at 94% 0%, rgba(186, 233, 255, 0.45), transparent 40%),
+        linear-gradient(160deg, #f9fbff 0%, #fff8f0 100%);
+      min-height: 100vh;
+    }
+    .page {
+      max-width: 1120px;
+      margin: 16px auto 28px;
+      padding: 0 14px 28px;
+    }
+    .hero {
+      background: linear-gradient(135deg, #7f6cff 0%, #46a8ff 55%, #7ce8a8 100%);
+      color: #fff;
+      border-radius: 14px;
+      padding: 16px 20px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow-soft);
+    }
+    h1 {
+      margin: 0;
+      letter-spacing: 0.3px;
+      font-size: 1.45rem;
+    }
+    .hero p {
+      margin: 8px 0 0;
+      color: rgba(255, 255, 255, 0.95);
+      line-height: 1.65;
+    }
+    h2 {
+      margin: 24px 0 10px;
+      padding: 6px 10px;
+      border-radius: 10px;
+      display: inline-flex;
+      align-items: center;
+      background: linear-gradient(90deg, rgba(255, 140, 194, 0.2), rgba(124, 218, 255, 0.2), rgba(255, 220, 160, 0.2));
+      color: #1f2a44;
+      font-size: 1.12rem;
+    }
+    .content {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }
+    .card {
+      position: relative;
+      background: var(--card-bg);
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px solid var(--card-border);
+      margin-bottom: 12px;
+      box-shadow: var(--shadow-soft);
+      overflow: hidden;
+      backdrop-filter: blur(0.5px);
+    }
+    .card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      background: var(--rainbow);
+    }
+    .card::after {
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 4px;
+      width: 5px;
+      height: calc(100% - 4px);
+      background: linear-gradient(180deg, #ff66c4 0%, #ffb16e 25%, #fff38f 50%, #7ef7c1 75%, #7ac3ff 100%);
+    }
+    .card h3 { margin-top: 2px; position: relative; z-index: 1; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.95rem; }
+    a { color: #5b4bff; text-underline-offset: 2px; }
+    ul { margin: 8px 0 0; padding-left: 20px; }
+    p { line-height: 1.7; }
+    .main-title { margin: 0 0 12px; display: block; }
+    .tech-wrap { display: grid; gap: 12px; }
+    @media (max-width: 920px) {
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+  <div class="hero">
+    <h1>AI 研究日报（2026-06-08）</h1>
+    <p>执行时间：2026-06-08（Asia/Shanghai）<br/>数据源：OpenAI Search / Tavily Search / GitHub / AG-UI / AIGCRank 微信AI公告号 / Twitter 美国科技公司 / 新浪研报（10大券商）</p>
+  </div>
+
+  <div class="content">
+    <section class="card tech-wrap">
+      <h2 class="main-title">技术概要</h2>
+      <section class='card tech-card'><h3>技术概要</h3><p>当前没有可用于技术归纳的 Claude/OpenAI 官方新内容。</p></section>
+    </section>
+    <section class="card">
+      <h2 class="main-title">优先渠道（最近一周）：Claude Blog / OpenAI Research</h2>
+      <section class='card'><h3>优先官方渠道</h3><p>本期未抓到两大官方渠道近一周可确认内容（或页面发布时间不可解析）。</p></section>
+    </section>
+    <section class="card">
+      <h2 class="main-title">AI 信息</h2>
+      <section class='card'><h3>Read Sam Altman&#x27;s plan for OpenAI as it enters its &#x27;third phase&#x27; - Business Insider</h3><ul><li>来源：Tavily Search（AI检索）</li><li>时间：</li><li>链接：<a href='https://www.businessinsider.com/sam-altman-openai-third-phase-plan-2026-6'>https://www.businessinsider.com/sam-altman-openai-third-phase-plan-2026-6</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section><section class='card'><h3>OpenAI is still working on that ‘super app’ - TechCrunch</h3><ul><li>来源：Tavily Search（AI检索）</li><li>时间：</li><li>链接：<a href='https://techcrunch.com/2026/06/07/openai-is-still-working-on-that-super-app/'>https://techcrunch.com/2026/06/07/openai-is-still-working-on-that-super-app/</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section><section class='card'><h3>OpenAI Is Working on a New &quot;Super App&quot; - Zamin.uz</h3><ul><li>来源：Tavily Search（AI检索）</li><li>时间：</li><li>链接：<a href='https://zamin.uz/en/technology/205831-openai-is-working-on-a-new-super-app.html'>https://zamin.uz/en/technology/205831-openai-is-working-on-a-new-super-app.html</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section><section class='card'><h3>What Smart People Are Saying About OpenAI&#x27;s IPO Filing - Business Insider</h3><ul><li>来源：Tavily Search（AI检索）</li><li>时间：</li><li>链接：<a href='https://www.businessinsider.com/openai-ipo-reactions-2026-6'>https://www.businessinsider.com/openai-ipo-reactions-2026-6</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section><section class='card'><h3>Anthropic Admitted Claude Is Close To Self-Improvement — Here’s What That Means - Dallas Express</h3><ul><li>来源：Tavily Search（AI检索）</li><li>时间：</li><li>链接：<a href='https://dallasexpress.com/business-markets/anthropic-admitted-claude-is-close-to-self-improvement-heres-what-that-means/'>https://dallasexpress.com/business-markets/anthropic-admitted-claude-is-close-to-self-improvement-heres-what-that-means/</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section><section class='card'><h3>Coinbase agents can now trade independently and pay for services - Zamin.uz</h3><ul><li>来源：Tavily Search（AI检索）</li><li>时间：</li><li>链接：<a href='https://zamin.uz/en/technology/206604-coinbase-agents-can-now-trade-independently-and-pay-for-services.html'>https://zamin.uz/en/technology/206604-coinbase-agents-can-now-trade-independently-and-pay-for-services.html</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section><section class='card'><h3>Why expensive AI subscriptions provide increasing value - AOL.com</h3><ul><li>来源：Tavily Search（AI检索）</li><li>时间：</li><li>链接：<a href='https://www.aol.com/news/why-expensive-ai-subscriptions-increasing-130009255.html'>https://www.aol.com/news/why-expensive-ai-subscriptions-increasing-130009255.html</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section><section class='card'><h3>Simple Booking Accelerates AI Transformation of Hotel Distribution with Release of MCP Connectors - Hospitality Net</h3><ul><li>来源：Tavily Search（AI检索）</li><li>时间：</li><li>链接：<a href='https://www.hospitalitynet.org/news/4132950/simple-booking-accelerates-ai-transformation-of-hotel-distribution-with-release-of-mcp-connectors'>https://www.hospitalitynet.org/news/4132950/simple-booking-accelerates-ai-transformation-of-hotel-distribution-with-release-of-mcp-connectors</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section>
+    </section>
+    <section class="card">
+      <h2 class="main-title">SKILL Top3</h2>
+      <section class='card'><h3>AI工程技术提效</h3><p>说明：偏向工作流/编排/编程提效相关的工程化能力。</p><p>状态：已匹配</p><ul><li><a href='https://github.com/rohitg00/agentmemory'>rohitg00/agentmemory</a>｜星数: <code>14578</code>｜7天增量: <code>10478</code>｜与目标场景相关，持续观察。</li><li><a href='https://github.com/langchain-ai/langchain'>langchain-ai/langchain</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li><li><a href='https://github.com/langchain-ai/langgraph'>langchain-ai/langgraph</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li></ul></section><section class='card'><h3>PPT技巧</h3><p>说明：偏向展示产出、演讲材料、知识传播的高效模板和生成工具。</p><p>状态：已匹配</p><ul><li><a href='https://github.com/marp-team/marp'>marp-team/marp</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li><li><a href='https://github.com/marp-team/marpit'>marp-team/marpit</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li><li><a href='https://github.com/microsoft/markitdown'>microsoft/markitdown</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li></ul></section><section class='card'><h3>赚钱相关</h3><p>说明：偏向变现、效率变现链路或商业化场景落地。</p><p>状态：已匹配</p><ul><li><a href='https://github.com/langfuse/langfuse'>langfuse/langfuse</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li><li><a href='https://github.com/arize-ai/phoenix'>arize-ai/phoenix</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li><li><a href='https://github.com/llamaindex/llama-index'>llamaindex/llama-index</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li></ul></section>
+    </section>
+    <section class="card">
+      <h2 class="main-title">AG-UI 与趋势</h2>
+      <div class='card'><h3>今日高频主题</h3><ul><li>api（8）</li><li>openai（4）</li><li>langchain-ai（4）</li><li>marp-team（4）</li><li>langfuse（4）</li><li>business（2）</li><li>insider（2）</li><li>working（2）</li></ul></div><div class='card'><h3>AG-UI</h3><ul><li>仓库：<a href="https://github.com/ag-ui-protocol/ag-ui">ag-ui-protocol/ag-ui</a></li><li>链接：<a href="https://github.com/ag-ui-protocol/ag-ui">https://github.com/ag-ui-protocol/ag-ui</a></li><li>当前星标：</li><li>描述：</li></ul></div><div class='card'><h3>GitHub 周度项目（星标>=1W，7天增量>=0.2W）</h3><ul><li><strong><a href='https://github.com/rohitg00/agentmemory'>rohitg00/agentmemory</a></strong>（GitHub（历史复用））：总星 <code>14578</code>，7 天增量 <code>10478</code></li><li><strong><a href='https://github.com/CloakHQ/CloakBrowser'>CloakHQ/CloakBrowser</a></strong>（GitHub（历史复用））：总星 <code>17086</code>，7 天增量 <code>11822</code></li><li><strong><a href='https://github.com/antirez/ds4'>antirez/ds4</a></strong>（GitHub（历史复用））：总星 <code>10898</code>，7 天增量 <code>4056</code></li><li><strong><a href='https://github.com/xai-org/x-algorithm'>xai-org/x-algorithm</a></strong>（GitHub（历史复用））：总星 <code>25502</code>，7 天增量 <code>9257</code></li></ul></div>
+    </section>
+    <section class="card">
+      <h2 class="main-title">WeChat Top20 AI 公告号</h2>
+      <div class='card'><ul><li>本轮未抓到微信 Top20 数据（源不可达或页面结构变化）。</li></ul></div>
+    </section>
+    <section class="card">
+      <h2 class="main-title">Twitter 美国科技公司 AI 动态</h2>
+      <div class='card'><ul><li>本轮未抓到 Twitter 更新。</li></ul></div>
+    </section>
+    <section class="card">
+      <h2 class="main-title">券商 AI 研报（10 大）</h2>
+      <div class='card'><h3>券商 AI 研报（10 大）</h3><ul><li>本轮未抓到 10 大券商可确认的AI研报（源不可达或页面结构变化）。</li></ul></div>
+    </section>
+    <section class="card">
+      <h2 class="main-title">执行建议</h2>
+      <div class='card'><ul><li>优先补齐任务板中的可恢复任务上下文（state+日志快照）。</li><li>对已触发较高涨星的 agent 工具仓库做一次本地试用评测。</li><li>对接微信 Top20 与新浪研报的同主题项，建立“可落地验证”清单。</li><li>关注 Twitter 美国大厂 AI 与治理、合规叙事的差异，补充跨行业对标。</li></ul></div>
+    </section>
+    <section class="card">
+      <h2 class="main-title">合并与差异</h2>
+      <div class='card'><p>今日差异：本日与前7天报告有关联，新增差异：2026-06-08</p></div>
+    </section>
+  </div>
+</div>
+</body>
+</html>

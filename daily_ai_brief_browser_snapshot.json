@@ -1,0 +1,69 @@
+{
+  "claude_blog": [
+    {
+      "title": "The Claude Cowork product guide",
+      "link": "https://claude.com/blog/the-claude-cowork-product-guide",
+      "time": "2026-06-05",
+      "summary": "公开了如何用 Claude Cowork 将对话输出转成可交付成果，包含多步骤任务编排、跨应用协作与7日例行工作流等能力，目标是把知识工作自动化。",
+      "source": "Claude 官方博文"
+    },
+    {
+      "title": "How one Anthropic seller rebuilt his team's workflows with Claude Code",
+      "link": "https://claude.com/blog/how-anthropic-uses-claude-gtm-engineering",
+      "time": "2026-06-05",
+      "summary": "未接触编程的销售负责人基于 Claude Code 自建 CLAFTS 邮件辅助系统，单日节省 2-3 小时并显著降低重复工作；文中也分享了将其沉淀为技能插件供全队复用的落地做法。",
+      "source": "Claude 官方博文"
+    },
+    {
+      "title": "How Anthropic enables self-service data analytics with Claude",
+      "link": "https://claude.com/blog/how-anthropic-enables-self-service-data-analytics-with-claude",
+      "time": "2026-06-03",
+      "summary": "Anthropic 讨论数据分析自服务治理，强调避免口令式 SQL 依赖，通过 LLM 结合业务数据视图提升报表与洞察能力，并给出 95% 自动化且约 95% 准确率的实践经验。",
+      "source": "Claude 官方博文"
+    },
+    {
+      "title": "Lessons from building Claude Code: How we use skills",
+      "link": "https://claude.com/blog/lessons-from-building-claude-code-how-we-use-skills",
+      "time": "2026-06-03",
+      "summary": "总结百余种技能实践，讲到技能目录设计、验证技能和数据采集技能的构建方式，强调可复用扩展点与任务稳定性对代理化开发效率的关键作用。",
+      "source": "Claude 官方博文"
+    },
+    {
+      "title": "Best practices for getting started with Claude Cowork",
+      "link": "https://claude.com/blog/best-practices-for-getting-started-with-claude-cowork",
+      "time": "2026-06-03",
+      "summary": "围绕 Claude Cowork 的上手策略，给出如何定义可交付任务、分配团队协作和优先级的建议，强调将重复工作移交给代理并保留人工价值环节。",
+      "source": "Claude 官方博文"
+    },
+    {
+      "title": "Running an AI-native engineering org",
+      "link": "https://claude.com/blog/running-an-ai-native-engineering-org",
+      "time": "2026-06-03",
+      "summary": "从组织实践角度讨论 AI-native 开发组织的流程变化：编码速度提高后，瓶颈转向评审与安全验证，提示团队需要围绕审核、权限和上线链路重建工作流。",
+      "source": "Claude 官方博文"
+    }
+  ],
+  "openai_research": [
+    {
+      "title": "ChatGPT Memory: Dreaming and Memory Upgrade",
+      "link": "https://openai.com/index/chatgpt-memory-dreaming/",
+      "time": "2026-06-04",
+      "summary": "OpenAI 发布新的记忆体系（Dreaming V3），目标是提升对话上下文的连续性与时效性，支持偏好记忆更新、长期连续任务和更低幻觉风险。",
+      "source": "OpenAI Research"
+    },
+    {
+      "title": "Introducing new capabilities to GPT‑Rosalind",
+      "link": "https://openai.com/index/introducing-new-capabilities-to-gpt-rosalind/",
+      "time": "2026-06-03",
+      "summary": "发布 GPT‑Rosalind 的新能力，重点提升生命科学任务中的药物化学、基因组与实验流程推理，并强调 LifeSciBench 作为端到端评测框架。",
+      "source": "OpenAI Research"
+    },
+    {
+      "title": "Strengthening societal resilience with Rosalind Biodefense",
+      "link": "https://openai.com/index/strengthening-societal-resilience-with-rosalind-biodefense/",
+      "time": "2026-05-29",
+      "summary": "该更新讨论生物防御场景下的治理模型，聚焦可信访问与高风险行业协作流程。",
+      "source": "OpenAI Research"
+    }
+  ]
+}

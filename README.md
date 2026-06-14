@@ -35,13 +35,15 @@
 ```bash
 cd /Users/jiubao/Desktop/codex_workplace/AI_daily_report
 DAILY_AI_BRIEF_EMAIL_TO=845761321@qq.com \
+DAILY_AI_BRIEF_SMTP_USER=yaogemail@gmail.com \
+DAILY_AI_BRIEF_SMTP_PASSWORD='your-gmail-app-password' \
 DAILY_AI_BRIEF_SEND_EMAIL=1 \
-DAILY_AI_BRIEF_FORCE_TERMINAL_EMAIL=1 \
+DAILY_AI_BRIEF_EMAIL_TRANSPORT=smtp \
 DAILY_AI_BRIEF_CATCHUP_DAYS=3 \
 python3 daily_ai_brief_runner.py
 ```
 
-如果输出里出现 `EMAIL_TERMINAL_CMD`，执行该命令并带上 SMTP 凭据：
+如果发送未成功或配置了终端模式，则执行 `EMAIL_TERMINAL_CMD` 并带上 SMTP 凭据：
 
 ```bash
 DAILY_AI_BRIEF_SMTP_USER=yaogemail@gmail.com \

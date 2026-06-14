@@ -1,0 +1,271 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>AI 研究日报总览</title>
+  <style>
+    :root {
+      --rainbow: linear-gradient(120deg, #ff7eb3, #ffbf7e, #fff07d, #7cf7bf, #79d9ff, #7b9dff, #d88bff);
+      --ink: #1f2937;
+      --subtle: #475569;
+      --card-bg: rgba(255, 255, 255, 0.95);
+      --card-border: rgba(226, 232, 240, 0.95);
+    }
+    body {
+      margin: 0;
+      font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      background: linear-gradient(160deg, #f8f9ff 0%, #f7fcff 35%, #fff7fb 100%);
+      color: var(--ink);
+      min-height: 100vh;
+    }
+    .page {
+      max-width: 1200px;
+      margin: 14px auto 30px;
+      padding: 0 14px 30px;
+    }
+    .hero {
+      background: linear-gradient(135deg, #7f4be0 0%, #3f84f9 45%, #15c4ff 75%, #7ce8a8 100%);
+      color: #fff;
+      border-radius: 16px;
+      padding: 16px 20px;
+      margin-bottom: 14px;
+    }
+    .hero h1 { margin: 0; font-size: 1.4rem; }
+    .hero p { margin: 8px 0 0; color: rgba(255,255,255,0.9); }
+    .top-area {
+      display: flex;
+      gap: 16px;
+      align-items: stretch;
+      margin-bottom: 14px;
+    }
+    .calendar-column { width: 50%; }
+    .preview-column { flex: 1; }
+    .section-title {
+      margin: 0 0 8px;
+      font-size: 1.08rem;
+      color: #1e293b;
+    }
+    .calendar-card, .preview-card {
+      background: var(--card-bg);
+      border: 1px solid var(--card-border);
+      border-radius: 14px;
+      padding: 12px;
+      box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
+      min-height: 420px;
+      position: relative;
+      overflow: hidden;
+    }
+    .calendar-card::before, .preview-card::before {
+      content: '';
+      position: absolute;
+      inset: 0 0 auto 0;
+      height: 4px;
+      background: var(--rainbow);
+    }
+    .month-block { margin-bottom: 18px; }
+    .month-block h4 {
+      margin: 8px 0 10px;
+      padding-left: 4px;
+    }
+    .year-block {
+      border: 1px solid #e2e8f0;
+      border-radius: 10px;
+      padding: 8px 10px;
+      margin-bottom: 10px;
+      background: #f8fafc;
+    }
+    .year-block summary {
+      cursor: pointer;
+      font-weight: 600;
+      color: #1e293b;
+      padding: 2px 0;
+    }
+    .year-block[open] { background: #f1f5ff; }
+    .year-block summary::-webkit-details-marker {
+      display: inline-block;
+      margin-right: 6px;
+    }
+    .calendar-grid {
+      border: 1px solid #e2e8f0;
+      border-radius: 12px;
+      padding: 8px;
+      background: #f8fafc;
+    }
+    .weekday {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      text-align: center;
+      font-size: 0.84rem;
+      color: var(--subtle);
+      margin-bottom: 4px;
+    }
+    .week {
+      list-style: none;
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 6px;
+      padding: 0;
+      margin: 6px 0;
+    }
+    .day-cell {
+      width: 100%;
+      height: 38px;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      border-radius: 9px;
+      font-size: 0.92rem;
+      box-sizing: border-box;
+    }
+    .day-cell.empty { color: transparent; }
+    .day-cell.no-report {
+      color: #94a3b8;
+      background: #f1f5f9;
+    }
+    .day-cell.has-report {
+      border: 1px solid #a5b4fc;
+      background: #ffffff;
+      color: #1e293b;
+      cursor: pointer;
+      transition: all .18s ease;
+      padding: 0;
+      font-weight: 600;
+    }
+    .day-cell.has-report:hover { transform: translateY(-1px); background: #eef2ff; }
+    .day-cell.has-report.active { outline: 2px solid #6366f1; background: #e0e7ff; }
+    .preview-area {
+      margin-top: 8px;
+      background: #ffffff;
+      border: 1px solid var(--card-border);
+      border-radius: 12px;
+      min-height: 460px;
+      padding: 10px;
+      box-shadow: 0 8px 24px rgba(15,23,42,0.08);
+      overflow: hidden;
+    }
+    .preview-toolbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      font-size: 0.95rem;
+      margin: 2px 4px 8px;
+      color: #334155;
+      flex-wrap: wrap;
+    }
+    .preview-frame {
+      width: 100%;
+      height: 520px;
+      border: none;
+      border-radius: 8px;
+      background: #fff;
+    }
+    .preview-empty { padding: 10px 8px; color: #64748b; }
+    .hint {
+      color: #64748b;
+      font-size: 0.9rem;
+      margin: 4px 4px 10px;
+    }
+    a { color: #4f46e5; }
+    @media (max-width: 980px) {
+      .top-area { flex-direction: column; }
+      .calendar-column { width: 100%; }
+      .preview-frame { height: 420px; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+    <section class="hero">
+      <h1>AI 研究日报总览</h1>
+      <p>点击日历中的日期，查看对应日期的日报内容；日历以有稿件日期高亮显示。</p>
+    </section>
+
+    <div class="top-area">
+      <div class="calendar-column">
+        <h2 class="section-title">日报日历（按年月）</h2>
+        <div class="calendar-card">
+          <details class='year-block' open><summary>2026 年 (2 月)</summary><section class='month-block'><h4>05月</h4><div class='calendar-grid'><div class='weekday'><span>周一</span><span>周二</span><span>周三</span><span>周四</span><span>周五</span><span>周六</span><span>周日</span></div><ul class='week'><li class='day-cell empty'></li><li class='day-cell empty'></li><li class='day-cell empty'></li><li class='day-cell empty'></li><li><span class='day-cell no-report'>01</span></li><li><span class='day-cell no-report'>02</span></li><li><span class='day-cell no-report'>03</span></li></ul><ul class='week'><li><span class='day-cell no-report'>04</span></li><li><span class='day-cell no-report'>05</span></li><li><span class='day-cell no-report'>06</span></li><li><span class='day-cell no-report'>07</span></li><li><span class='day-cell no-report'>08</span></li><li><span class='day-cell no-report'>09</span></li><li><span class='day-cell no-report'>10</span></li></ul><ul class='week'><li><span class='day-cell no-report'>11</span></li><li><span class='day-cell no-report'>12</span></li><li><span class='day-cell no-report'>13</span></li><li><span class='day-cell no-report'>14</span></li><li><span class='day-cell no-report'>15</span></li><li><span class='day-cell no-report'>16</span></li><li><span class='day-cell no-report'>17</span></li></ul><ul class='week'><li><span class='day-cell no-report'>18</span></li><li><span class='day-cell no-report'>19</span></li><li><span class='day-cell no-report'>20</span></li><li><span class='day-cell no-report'>21</span></li><li><span class='day-cell no-report'>22</span></li><li><span class='day-cell no-report'>23</span></li><li><span class='day-cell no-report'>24</span></li></ul><ul class='week'><li><span class='day-cell no-report'>25</span></li><li><button type='button' class='day-cell has-report' data-date='2026-05-26'>26</button></li><li><span class='day-cell no-report'>27</span></li><li><span class='day-cell no-report'>28</span></li><li><span class='day-cell no-report'>29</span></li><li><span class='day-cell no-report'>30</span></li><li><span class='day-cell no-report'>31</span></li></ul></div></section><section class='month-block'><h4>06月</h4><div class='calendar-grid'><div class='weekday'><span>周一</span><span>周二</span><span>周三</span><span>周四</span><span>周五</span><span>周六</span><span>周日</span></div><ul class='week'><li><span class='day-cell no-report'>01</span></li><li><span class='day-cell no-report'>02</span></li><li><span class='day-cell no-report'>03</span></li><li><span class='day-cell no-report'>04</span></li><li><button type='button' class='day-cell has-report' data-date='2026-06-05'>05</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-06'>06</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-07'>07</button></li></ul><ul class='week'><li><button type='button' class='day-cell has-report' data-date='2026-06-08'>08</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-09'>09</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-10'>10</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-11'>11</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-12'>12</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-13'>13</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-14'>14</button></li></ul><ul class='week'><li><span class='day-cell no-report'>15</span></li><li><span class='day-cell no-report'>16</span></li><li><span class='day-cell no-report'>17</span></li><li><span class='day-cell no-report'>18</span></li><li><span class='day-cell no-report'>19</span></li><li><span class='day-cell no-report'>20</span></li><li><span class='day-cell no-report'>21</span></li></ul><ul class='week'><li><span class='day-cell no-report'>22</span></li><li><span class='day-cell no-report'>23</span></li><li><span class='day-cell no-report'>24</span></li><li><span class='day-cell no-report'>25</span></li><li><span class='day-cell no-report'>26</span></li><li><span class='day-cell no-report'>27</span></li><li><span class='day-cell no-report'>28</span></li></ul><ul class='week'><li><span class='day-cell no-report'>29</span></li><li><span class='day-cell no-report'>30</span></li><li class='day-cell empty'></li><li class='day-cell empty'></li><li class='day-cell empty'></li><li class='day-cell empty'></li><li class='day-cell empty'></li></ul></div></section></details>
+        </div>
+      </div>
+      <div class="preview-column">
+        <h2 class="section-title">日期日报信息</h2>
+        <div class="preview-card">
+          <div class="preview-toolbar">
+            <span id="selectedDate">未选择日期</span>
+            <span id="selectedMeta"></span>
+          </div>
+          <div class="hint" id="previewHint">支持点击日历中的有日报日期；右侧将预览完整 HTML。</div>
+          <iframe id="reportFrame" class="preview-frame" title="日报预览"></iframe>
+        </div>
+      </div>
+    </div>
+
+    <div class="preview-area">
+      <div class="section-title" style="margin: 0 0 10px;">快速说明</div>
+      <div class="preview-empty">
+        说明：页面默认展示最近一条日报；所有日报文件位于 report 目录，包含 HTML 与 MD 两种版本。<br/>
+        Markdown 版本可直接下载到本地查看：<span id="mdLink"></span>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const reports = {"2026-05-26": {"date": "2026-05-26", "title": "AI 与个人信息日报（2026-05-26）", "html": "daily_ai_brief_2026-05-26.html", "md": "daily_ai_brief_2026-05-26.md"}, "2026-06-05": {"date": "2026-06-05", "title": "AI 研究日报（2026-06-05）", "html": "daily_ai_brief_2026-06-05.html", "md": "daily_ai_brief_2026-06-05.md"}, "2026-06-06": {"date": "2026-06-06", "title": "AI 研究日报（2026-06-06）", "html": "daily_ai_brief_2026-06-06.html", "md": "daily_ai_brief_2026-06-06.md"}, "2026-06-07": {"date": "2026-06-07", "title": "AI 研究日报（2026-06-07）", "html": "daily_ai_brief_2026-06-07.html", "md": "daily_ai_brief_2026-06-07.md"}, "2026-06-08": {"date": "2026-06-08", "title": "AI 研究日报（2026-06-08）", "html": "daily_ai_brief_2026-06-08.html", "md": "daily_ai_brief_2026-06-08.md"}, "2026-06-09": {"date": "2026-06-09", "title": "AI 研究日报（2026-06-09）", "html": "daily_ai_brief_2026-06-09.html", "md": "daily_ai_brief_2026-06-09.md"}, "2026-06-10": {"date": "2026-06-10", "title": "AI 研究日报（2026-06-10）", "html": "daily_ai_brief_2026-06-10.html", "md": "daily_ai_brief_2026-06-10.md"}, "2026-06-11": {"date": "2026-06-11", "title": "AI 研究日报（2026-06-11）", "html": "daily_ai_brief_2026-06-11.html", "md": "daily_ai_brief_2026-06-11.md"}, "2026-06-12": {"date": "2026-06-12", "title": "AI 研究日报（2026-06-12）", "html": "daily_ai_brief_2026-06-12.html", "md": "daily_ai_brief_2026-06-12.md"}, "2026-06-13": {"date": "2026-06-13", "title": "AI 研究日报（2026-06-13）", "html": "daily_ai_brief_2026-06-13.html", "md": "daily_ai_brief_2026-06-13.md"}, "2026-06-14": {"date": "2026-06-14", "title": "AI 研究日报（2026-06-14）", "html": "daily_ai_brief_2026-06-14.html", "md": "daily_ai_brief_2026-06-14.md"}};
+    const dateButtons = Array.from(document.querySelectorAll('.day-cell.has-report'));
+    const frame = document.getElementById('reportFrame');
+    const selectedDate = document.getElementById('selectedDate');
+    const selectedMeta = document.getElementById('selectedMeta');
+    const previewHint = document.getElementById('previewHint');
+    const mdLinkWrap = document.getElementById('mdLink');
+
+    function showReport(date) {
+      const item = reports[date];
+      if (!item) {
+        return;
+      }
+      frame.src = item.html;
+      selectedDate.textContent = `当前日期：${date}`;
+      selectedMeta.textContent = item.title || '';
+      previewHint.textContent = '已加载 HTML：' + item.html;
+      if (item.md) {
+        mdLinkWrap.innerHTML = `<a href="${item.md}" target="_blank">打开 Markdown</a>`;
+      } else {
+        mdLinkWrap.textContent = '当前日期未保存 Markdown 文件';
+      }
+    }
+
+    function setActive(button) {
+      dateButtons.forEach(btn => btn.classList.remove('active'));
+      if (button) {
+        button.classList.add('active');
+      }
+    }
+
+    dateButtons.forEach(btn => {
+      btn.addEventListener('click', () => {
+        const date = btn.getAttribute('data-date') || '';
+        setActive(btn);
+        if (date) {
+          showReport(date);
+        }
+      });
+    });
+
+    const defaultDates = Object.keys(reports).sort();
+    if (defaultDates.length) {
+      const latest = defaultDates[defaultDates.length - 1];
+      const latestBtn = document.querySelector(`button[data-date="${latest}"]`);
+      if (latestBtn) {
+        setActive(latestBtn);
+        showReport(latest);
+      }
+    } else {
+      selectedDate.textContent = '未找到可展示日报';
+      previewHint.textContent = '请先执行日报脚本生成 daily_ai_brief_YYYY-MM-DD.html 文件';
+      mdLinkWrap.textContent = '';
+    }
+  </script>
+</body>
+</html>

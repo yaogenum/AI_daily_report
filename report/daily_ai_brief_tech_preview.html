@@ -1,0 +1,123 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8" />
+  <title>AI 研究日报（2026-06-06）</title>
+  <style>
+    :root {
+      --rainbow: linear-gradient(120deg, #ff7eb3, #ffbf7e, #fff07d, #7cf7bf, #79d9ff, #7b9dff, #d88bff);
+      --ink: #1f2937;
+      --subtle: #64748b;
+    }
+    body { font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif; margin: 0; background:
+      radial-gradient(circle at 8% 12%, #fff4d6 0%, transparent 42%),
+      radial-gradient(circle at 92% 0%, #fbe4ff 0%, transparent 45%),
+      linear-gradient(160deg, #f8f9ff 0%, #f7fcff 35%, #fff7fb 100%); color: var(--ink); min-height: 100vh; }
+    .page { max-width: 1040px; margin: 22px auto; padding: 0 18px 36px; }
+    .hero { background: linear-gradient(135deg, #7f4be0 0%, #3f84f9 45%, #15c4ff 75%, #7ce8a8 100%); color: #fff; border-radius: 18px; padding: 20px 24px; box-shadow: 0 10px 30px rgba(111, 74, 223, 0.20); margin-bottom: 16px; }
+    h1 { margin: 0; letter-spacing: 0.4px; }
+    .hero p { margin: 10px 0 0; color: rgba(255, 255, 255, 0.92); line-height: 1.6; }
+    h2 { margin: 24px 0 10px; padding: 6px 10px; border-radius: 10px; display: inline-flex; align-items: center; background: linear-gradient(90deg, rgba(255, 111, 174, 0.15), rgba(124, 218, 255, 0.15), rgba(255, 189, 126, 0.15)); color: #1f2a44; font-size: 1.12rem; }
+    .card { position: relative; background: rgba(255, 255, 255, 0.92); padding: 14px 16px; border-radius: 14px; border: 1px solid rgba(226, 232, 240, 0.95); margin-bottom: 12px; box-shadow: 0 8px 26px rgba(15, 23, 42, 0.08); backdrop-filter: blur(0.5px); overflow: hidden; }
+    .card::before { content: ''; position: absolute; top: 0; left: 0; width: 100%; height: 5px; background: var(--rainbow); }
+    .card::after { content: ''; position: absolute; left: 0; top: 5px; width: 5px; height: calc(100% - 5px); background: linear-gradient(180deg, #ff66c4 0%, #ffb16e 24%, #fff38f 48%, #7ef7c1 73%, #7ac3ff 100%); }
+    .card h3 { margin-top: 2px; position: relative; z-index: 1; }
+    code { background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.95rem; }
+    a { color: #5b4bff; text-underline-offset: 2px; font-weight: 500; }
+    ul { margin: 8px 0 0; padding-left: 20px; }
+    p { line-height: 1.7; }
+    .layout { display: grid; grid-template-columns: 300px 1fr; gap: 16px; align-items: start; }
+    .left-col { display: grid; grid-template-columns: 1fr; gap: 12px; position: sticky; top: 16px; }
+    .left-col .card p { margin: 0 0 8px; }
+    .left-col .card ul { margin-bottom: 0; }
+    .left-col .tech-media { display: grid; grid-template-columns: 1fr; gap: 10px; }
+    .left-col .tech-media img { max-width: 100%; width: 100%; border-radius: 8px; border: 1px solid #e2e8f0; }
+    .left-col .tech-media figure { margin: 8px 0 0; }
+    .left-col .tech-media figcaption { color: var(--subtle); font-size: 0.84rem; margin-top: 4px; }
+    .left-col .tabs { display: grid; gap: 8px; }
+    .left-col .tabs button { width: 100%; text-align: left; padding: 9px 10px; border-radius: 8px; border: 1px solid #dbe3f5; background: #fff; cursor: pointer; }
+    .left-col .tabs button:hover { background: #f8fafc; }
+    .left-col .tabs button.active { border-color: #7c3aed; background: #f3f0ff; color: #2b2c8d; font-weight: 600; }
+    .right-col { min-width: 0; }
+    .tabs-row { display: flex; flex-wrap: wrap; gap: 10px; margin: 2px 0 14px; }
+    .tab-btn { border: 0; border-radius: 10px; padding: 9px 14px; background: #e9eef8; cursor: pointer; font-weight: 500; }
+    .tab-btn.active { color: #fff; background: linear-gradient(90deg, #5f3dc4, #3b82f6); }
+    .tab-panel { display: none; animation: fadeIn 0.2s ease; }
+    .tab-panel.active { display: block; }
+    @keyframes fadeIn { from { opacity: 0.6; transform: translateY(3px); } to { opacity: 1; transform: translateY(0); } }
+    .main-title { margin-bottom: 12px; display: block; }
+    @media (max-width: 920px) {
+      .layout { grid-template-columns: 1fr; }
+      .left-col { position: static; }
+    }
+  </style>
+</head>
+<body>
+  <div class="page">
+  <div class="hero">
+    <h1>AI 研究日报（2026-06-06）</h1>
+    <p>执行时间：2026-06-06（Asia/Shanghai）<br/>数据源：Claude 官方博文 / OpenAI Research / OpenAI Search / Tavily Search / GitHub / AG-UI / AIGCRank 微信AI公告号 / Twitter 美国科技公司 / 新浪研报（10大券商）</p>
+  </div>
+
+  <div class="layout">
+    <aside class="left-col">
+      <section class="card">
+        <h3>信息列表</h3>
+        <ul class="tabs"><li><button type='button' data-tab='tab-priority'>优先官方渠道</button></li><li><button type='button' data-tab='tab-ai'>AI 信息</button></li><li><button type='button' data-tab='tab-skill'>SKILL Top3</button></li><li><button type='button' data-tab='tab-trend'>AG-UI与趋势</button></li><li><button type='button' data-tab='tab-chat'>WeChat Top20</button></li><li><button type='button' data-tab='tab-twitter'>Twitter 动态</button></li><li><button type='button' data-tab='tab-broker'>券商研报</button></li><li><button type='button' data-tab='tab-suggest'>执行建议</button></li><li><button type='button' data-tab='tab-diff'>合并与差异</button></li></ul>
+      </section>
+      <section class="card">
+        <h3>技术概要</h3>
+        <section class='card tech-card'><h3>Claude 官方博文 技术概要</h3><div class='card-inner'><p>技术提取关键词</p><ul><li>编排</li><li>workflow</li></ul><p>架构与原图信息</p><ul><li>已见到架构/组件线索：<a href='https://claude.com/blog/the-claude-cowork-product-guide'>The Claude Cowork product guide</a></li><li>已见到架构/组件线索：<a href='https://claude.com/blog/how-anthropic-uses-claude-gtm-engineering'>How one Anthropic seller rebuilt his team&#x27;s workflows with Claude Code</a></li></ul></div></section><section class='card tech-card'><h3>OpenAI Research 技术概要</h3><div class='card-inner'><p>技术提取关键词</p><ul><li>memory</li><li>推理</li></ul><p>架构与原图信息</p><ul><li>本期未在内容中直接提到具体架构图描述。</li></ul></div></section>
+      </section>
+    </aside>
+
+    <main class="right-col">
+      <h2 class="main-title">日报内容</h2>
+      <div class="tabs-row"><button type='button' class='tab-btn' data-target='tab-priority'>优先官方渠道</button><button type='button' class='tab-btn' data-target='tab-ai'>AI 信息</button><button type='button' class='tab-btn' data-target='tab-skill'>SKILL Top3</button><button type='button' class='tab-btn' data-target='tab-trend'>AG-UI/趋势</button><button type='button' class='tab-btn' data-target='tab-chat'>WeChat</button><button type='button' class='tab-btn' data-target='tab-twitter'>Twitter</button><button type='button' class='tab-btn' data-target='tab-broker'>券商研报</button><button type='button' class='tab-btn' data-target='tab-suggest'>执行建议</button><button type='button' class='tab-btn' data-target='tab-diff'>合并与差异</button></div>
+      <section id="tab-priority" class="tab-panel">
+        <h2>优先渠道（最近一周）：Claude Blog / OpenAI Research</h2>
+        <section class='card'><h3>Claude 官方博文</h3><ul><li><strong>The Claude Cowork product guide</strong>（Claude 官方博文 | 2026-06-05)<br/>摘要：公开了如何用 Claude Cowork 将对话输出转成可交付成果，包含多步骤任务编排、跨应用协作与7日例行工作流等能力，目标是把知识工作自动化。<br/><a href='https://claude.com/blog/the-claude-cowork-product-guide'>https://claude.com/blog/the-claude-cowork-product-guide</a></li><li><strong>How one Anthropic seller rebuilt his team&#x27;s workflows with Claude Code</strong>（Claude 官方博文 | 2026-06-05)<br/>摘要：未接触编程的销售负责人基于 Claude Code 自建 CLAFTS 邮件辅助系统，单日节省 2-3 小时并显著降低重复工作；文中也分享了将其沉淀为技能插件供全队复用的落地做法。<br/><a href='https://claude.com/blog/how-anthropic-uses-claude-gtm-engineering'>https://claude.com/blog/how-anthropic-uses-claude-gtm-engineering</a></li><li><strong>How Anthropic enables self-service data analytics with Claude</strong>（Claude 官方博文 | 2026-06-03)<br/>摘要：Anthropic 讨论数据分析自服务治理，强调避免口令式 SQL 依赖，通过 LLM 结合业务数据视图提升报表与洞察能力，并给出 95% 自动化且约 95% 准确率的实践经验。<br/><a href='https://claude.com/blog/how-anthropic-enables-self-service-data-analytics-with-claude'>https://claude.com/blog/how-anthropic-enables-self-service-data-analytics-with-claude</a></li><li><strong>Lessons from building Claude Code: How we use skills</strong>（Claude 官方博文 | 2026-06-03)<br/>摘要：总结百余种技能实践，讲到技能目录设计、验证技能和数据采集技能的构建方式，强调可复用扩展点与任务稳定性对代理化开发效率的关键作用。<br/><a href='https://claude.com/blog/lessons-from-building-claude-code-how-we-use-skills'>https://claude.com/blog/lessons-from-building-claude-code-how-we-use-skills</a></li><li><strong>Best practices for getting started with Claude Cowork</strong>（Claude 官方博文 | 2026-06-03)<br/>摘要：围绕 Claude Cowork 的上手策略，给出如何定义可交付任务、分配团队协作和优先级的建议，强调将重复工作移交给代理并保留人工价值环节。<br/><a href='https://claude.com/blog/best-practices-for-getting-started-with-claude-cowork'>https://claude.com/blog/best-practices-for-getting-started-with-claude-cowork</a></li><li><strong>Running an AI-native engineering org</strong>（Claude 官方博文 | 2026-06-03)<br/>摘要：从组织实践角度讨论 AI-native 开发组织的流程变化：编码速度提高后，瓶颈转向评审与安全验证，提示团队需要围绕审核、权限和上线链路重建工作流。<br/><a href='https://claude.com/blog/running-an-ai-native-engineering-org'>https://claude.com/blog/running-an-ai-native-engineering-org</a></li></ul></section><section class='card'><h3>OpenAI Research</h3><ul><li><strong>ChatGPT Memory: Dreaming and Memory Upgrade</strong>（OpenAI Research | 2026-06-04)<br/>摘要：OpenAI 发布新的记忆体系（Dreaming V3），目标是提升对话上下文的连续性与时效性，支持偏好记忆更新、长期连续任务和更低幻觉风险。<br/><a href='https://openai.com/index/chatgpt-memory-dreaming/'>https://openai.com/index/chatgpt-memory-dreaming/</a></li><li><strong>Introducing new capabilities to GPT‑Rosalind</strong>（OpenAI Research | 2026-06-03)<br/>摘要：发布 GPT‑Rosalind 的新能力，重点提升生命科学任务中的药物化学、基因组与实验流程推理，并强调 LifeSciBench 作为端到端评测框架。<br/><a href='https://openai.com/index/introducing-new-capabilities-to-gpt-rosalind/'>https://openai.com/index/introducing-new-capabilities-to-gpt-rosalind/</a></li></ul></section>
+      </section>
+      <section id="tab-ai" class="tab-panel"><section class='card'><h3>OpenAI diverges from White House on AI safety rules - Politico</h3><ul><li>来源：Tavily Search（AI检索）（历史复用）</li><li>时间：</li><li>链接：<a href='https://www.politico.com/news/2026/06/03/openai-white-house-ai-safety-rules-00948478'>https://www.politico.com/news/2026/06/03/openai-white-house-ai-safety-rules-00948478</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section><section class='card'><h3>OpenAI Is Paying $445K to Study Self-Improving AI Risks - Memeburn</h3><ul><li>来源：Tavily Search（AI检索）（历史复用）</li><li>时间：</li><li>链接：<a href='https://memeburn.com/openai-is-paying-445k-to-study-self-improving-ai-risks/'>https://memeburn.com/openai-is-paying-445k-to-study-self-improving-ai-risks/</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section><section class='card'><h3>Sam Altman’s OpenAI just made robotics its next frontier and it’s hiring to prove it - Tech Funding News</h3><ul><li>来源：Tavily Search（AI检索）（历史复用）</li><li>时间：</li><li>链接：<a href='https://techfundingnews.com/sam-altmans-openai-just-made-robotics-its-next-frontier-and-its-hiring-to-prove-it/'>https://techfundingnews.com/sam-altmans-openai-just-made-robotics-its-next-frontier-and-its-hiring-to-prove-it/</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section><section class='card'><h3>Florida sues OpenAI, Sam Altman, in first-of-its-kind lawsuit over violent incidents - TechCrunch</h3><ul><li>来源：Tavily Search（AI检索）（历史复用）</li><li>时间：</li><li>链接：<a href='https://techcrunch.com/2026/06/01/florida-sues-openai-sam-altman-in-first-of-its-kind-lawsuit-over-violent-incidents/'>https://techcrunch.com/2026/06/01/florida-sues-openai-sam-altman-in-first-of-its-kind-lawsuit-over-violent-incidents/</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section><section class='card'><h3>Anthropic says 80% of its new production code is now authored by Claude — how your enterprise can keep up - VentureBeat</h3><ul><li>来源：Tavily Search（AI检索）（历史复用）</li><li>时间：</li><li>链接：<a href='https://venturebeat.com/technology/anthropic-says-80-of-its-new-production-code-is-now-authored-by-claude-how-your-enterprise-can-keep-up'>https://venturebeat.com/technology/anthropic-says-80-of-its-new-production-code-is-now-authored-by-claude-how-your-enterprise-can-keep-up</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section><section class='card'><h3>Snowflake and Anthropic Accelerate Enterprise AI Adoption Driven by Rising Demand for Governed AI - Financial Times</h3><ul><li>来源：Tavily Search（AI检索）（历史复用）</li><li>时间：</li><li>链接：<a href='https://markets.ft.com/data/announce/detail?dockey=600-202606012000BIZWIRE_USPRX____20260601_BW623088-1'>https://markets.ft.com/data/announce/detail?dockey=600-202606012000BIZWIRE_USPRX____20260601_BW623088-1</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section><section class='card'><h3>The Claude Cowork product guide</h3><ul><li>来源：Claude 官方博文</li><li>时间：2026-06-05</li><li>链接：<a href='https://claude.com/blog/the-claude-cowork-product-guide'>https://claude.com/blog/the-claude-cowork-product-guide</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section><section class='card'><h3>How one Anthropic seller rebuilt his team&#x27;s workflows with Claude Code</h3><ul><li>来源：Claude 官方博文</li><li>时间：2026-06-05</li><li>链接：<a href='https://claude.com/blog/how-anthropic-uses-claude-gtm-engineering'>https://claude.com/blog/how-anthropic-uses-claude-gtm-engineering</a></li><li>核心：关注该方向对任务可观察性与可执行性的影响。</li></ul></section></section>
+      <section id="tab-skill" class="tab-panel">
+        <h2>SKILL Top3</h2>
+        <section class='card'><h3>AI工程技术提效</h3><p>说明：偏向工作流/编排/编程提效相关的工程化能力。</p><p>状态：已匹配</p><ul><li><a href='https://github.com/rohitg00/agentmemory'>rohitg00/agentmemory</a>｜星数: <code>14578</code>｜7天增量: <code>10478</code>｜与目标场景相关，持续观察。</li><li><a href='https://github.com/langchain-ai/langchain'>langchain-ai/langchain</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li><li><a href='https://github.com/langchain-ai/langgraph'>langchain-ai/langgraph</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li></ul></section><section class='card'><h3>PPT技巧</h3><p>说明：偏向展示产出、演讲材料、知识传播的高效模板和生成工具。</p><p>状态：已匹配</p><ul><li><a href='https://github.com/marp-team/marp'>marp-team/marp</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li><li><a href='https://github.com/marp-team/marpit'>marp-team/marpit</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li><li><a href='https://github.com/microsoft/markitdown'>microsoft/markitdown</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li></ul></section><section class='card'><h3>赚钱相关</h3><p>说明：偏向变现、效率变现链路或商业化场景落地。</p><p>状态：已匹配</p><ul><li><a href='https://github.com/langfuse/langfuse'>langfuse/langfuse</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li><li><a href='https://github.com/arize-ai/phoenix'>arize-ai/phoenix</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li><li><a href='https://github.com/llamaindex/llama-index'>llamaindex/llama-index</a>｜星数: <code>0</code>｜7天增量: <code>0</code>｜当前 API 无法抓取，先回填仓库名用于兜底展示。</li></ul></section>
+      </section>
+      <section id="tab-trend" class="tab-panel"><div class='card'><h3>今日高频主题</h3><ul><li>api（8）</li><li>openai（4）</li><li>langchain-ai（4）</li><li>marp-team（4）</li><li>langfuse（4）</li><li>anthropic（3）</li><li>claude（3）</li><li>sam（2）</li></ul></div><div class='card'><h3>AG-UI</h3><ul><li>仓库：<a href="https://github.com/ag-ui-protocol/ag-ui">ag-ui-protocol/ag-ui</a></li><li>链接：<a href="https://github.com/ag-ui-protocol/ag-ui">https://github.com/ag-ui-protocol/ag-ui</a></li><li>当前星标：</li><li>描述：</li></ul></div><div class='card'><h3>GitHub 周度项目（星标>=1W，7天增量>=0.2W）</h3><ul><li><strong><a href='https://github.com/rohitg00/agentmemory'>rohitg00/agentmemory</a></strong>（GitHub（历史复用））：总星 <code>14578</code>，7 天增量 <code>10478</code></li><li><strong><a href='https://github.com/CloakHQ/CloakBrowser'>CloakHQ/CloakBrowser</a></strong>（GitHub（历史复用））：总星 <code>17086</code>，7 天增量 <code>11822</code></li><li><strong><a href='https://github.com/antirez/ds4'>antirez/ds4</a></strong>（GitHub（历史复用））：总星 <code>10898</code>，7 天增量 <code>4056</code></li><li><strong><a href='https://github.com/xai-org/x-algorithm'>xai-org/x-algorithm</a></strong>（GitHub（历史复用））：总星 <code>25502</code>，7 天增量 <code>9257</code></li></ul></div></section>
+      <section id="tab-chat" class="tab-panel">
+        <h2>WeChat Top20 AI 公告号</h2>
+        <div class='card'><ul><li>本轮未抓到微信 Top20 数据（源不可达或页面结构变化）。</li></ul></div>
+      </section>
+      <section id="tab-twitter" class="tab-panel">
+        <h2>Twitter 美国科技公司 AI 动态</h2>
+        <div class='card'><ul><li>本轮未抓到 Twitter 更新。</li></ul></div>
+      </section>
+      <section id="tab-broker" class="tab-panel">
+        <h2>券商 AI 研报（10 大）</h2>
+        <div class='card'><h3>券商 AI 研报（10 大）</h3><ul><li>本轮未抓到 10 大券商可确认的AI研报（源不可达或页面结构变化）。</li></ul></div>
+      </section>
+      <section id="tab-suggest" class="tab-panel"><div class='card'><ul><li>优先补齐任务板中的可恢复任务上下文（state+日志快照）。</li><li>对已触发较高涨星的 agent 工具仓库做一次本地试用评测。</li><li>对接微信 Top20 与新浪研报的同主题项，建立“可落地验证”清单。</li><li>关注 Twitter 美国大厂 AI 与治理、合规叙事的差异，补充跨行业对标。</li></ul></div></section>
+      <section id="tab-diff" class="tab-panel"><div class='card'><p>今日差异：本日与前7天报告有关联，新增差异：2026-06-07</p><p>保留策略：最近14条；清理旧记录 29 条；当前保留 14 条；7天关联窗口 7 天；今日是否合并：是。</p></div></section>
+    </main>
+  </div>
+</div>
+
+  <script>
+    const tabButtons = Array.from(document.querySelectorAll('.tab-btn'));
+    const tabs = Array.from(document.querySelectorAll('.tab-panel'));
+    const navButtons = Array.from(document.querySelectorAll('.tabs button'));
+
+    function setTab(target) {
+      if (!target) return;
+      const targetId = target.startsWith('tab-') ? target : `tab-${target}`;
+      tabs.forEach(panel => panel.classList.toggle('active', panel.id === targetId));
+      tabButtons.forEach(btn => btn.classList.toggle('active', btn.getAttribute('data-target') === targetId));
+      navButtons.forEach(btn => btn.classList.toggle('active', btn.getAttribute('data-tab') === targetId));
+    }
+
+    tabButtons.forEach(btn => btn.addEventListener('click', () => setTab(btn.getAttribute('data-target') || 'tab-priority')));
+    navButtons.forEach(btn => btn.addEventListener('click', () => setTab(btn.getAttribute('data-tab') || 'tab-priority')));
+    setTab('priority');
+  </script>
+</body>
+</html>

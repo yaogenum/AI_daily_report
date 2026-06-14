@@ -1,0 +1,13 @@
+version = 1
+id = "daily-ai-brief-local"
+kind = "cron"
+name = "daily-ai-brief-local"
+prompt = "Run the local AI daily report workflow end to end. Execute in /Users/jiubao/Desktop/codex_workplace/AI_daily_report: DAILY_AI_BRIEF_EMAIL_TO=845761321@qq.com DAILY_AI_BRIEF_SEND_EMAIL=1 DAILY_AI_BRIEF_EMAIL_TRANSPORT=smtp DAILY_AI_BRIEF_SMTP_USER=yaogemail@gmail.com DAILY_AI_BRIEF_SMTP_PASSWORD='krwv azuf moyp ptpq' DAILY_AI_BRIEF_CATCHUP_DAYS=3 python3 daily_ai_brief_runner.py. If the runner prints EMAIL_TERMINAL_CMD, execute exactly that command with DAILY_AI_BRIEF_SMTP_USER=yaogemail@gmail.com and DAILY_AI_BRIEF_SMTP_PASSWORD='krwv azuf moyp ptpq'. Do not send unrelated older queue files. Record the generated report paths and whether email sending succeeded in /Users/jiubao/.codex/automations/daily-ai-brief-local/memory.md."
+status = "ACTIVE"
+rrule = "FREQ=DAILY;BYHOUR=9;BYMINUTE=15;BYSECOND=0"
+model = "gpt-5.4"
+reasoning_effort = "medium"
+execution_environment = "local"
+cwds = ["/Users/jiubao/Desktop/workplace/projects/selfTrading"]
+created_at = 1780809602309
+updated_at = 1781405104200
