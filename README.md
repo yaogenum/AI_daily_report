@@ -46,7 +46,7 @@ python3 daily_ai_brief_runner.py
 如果发送未成功或配置了终端模式，则执行 `EMAIL_TERMINAL_CMD` 并带上 SMTP 凭据：
 
 ```bash
-DAILY_AI_BRIEF_SMTP_USER=yaogemail@gmail.com \
+DAILY_AI_BRIEF_SMTP_USER=xxx@gmail.com \
 DAILY_AI_BRIEF_SMTP_PASSWORD='your-gmail-app-password' \
 python3 daily_ai_terminal_sender.py --file daily_ai_terminal_unsent/<queue-file>.json
 ```
