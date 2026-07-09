@@ -1,0 +1,28 @@
+.DS_Store
+__pycache__/
+*.pyc
+
+# Local secrets and runtime state
+report.config
+logs/
+daily_ai_unsent/archive/
+daily_ai_terminal_unsent/archive/
+
+# Generated reports after the committed historical baseline
+report/daily_ai_brief_2026-06-15.*
+report/daily_ai_brief_2026-06-16.*
+report/daily_ai_brief_2026-06-17.*
+report/daily_ai_brief_2026-06-18.*
+report/daily_ai_brief_2026-06-19.*
+report/daily_ai_brief_2026-06-20.*
+report/daily_ai_brief_2026-06-21.*
+report/daily_ai_brief_2026-06-22.*
+report/daily_ai_brief_2026-06-23.*
+report/daily_ai_brief_2026-06-24.*
+report/daily_ai_brief_2026-06-25.*
+report/daily_ai_brief_2026-06-26.*
+report/daily_ai_brief_2026-06-27.*
+report/daily_ai_brief_2026-06-28.*
+report/daily_ai_brief_2026-06-29.*
+report/daily_ai_brief_2026-06-30.*
+report/daily_ai_brief_2026-07-*.*

@@ -12,7 +12,9 @@ from __future__ import annotations
 import argparse
 import os
 import json
+import signal
 import socket
+import time
 from collections import Counter
 import calendar
 import platform
@@ -31,6 +33,42 @@ from typing import Callable, Dict, List
 from email.message import EmailMessage
 
 
+REPORT_CONFIG_FILE = Path(__file__).with_name("report.config")
+_REPORT_CONFIG_CACHE: dict[str, str] | None = None
+
+
+def _load_report_config() -> dict[str, str]:
+    global _REPORT_CONFIG_CACHE
+    if _REPORT_CONFIG_CACHE is not None:
+        return _REPORT_CONFIG_CACHE
+
+    config: dict[str, str] = {}
+    if not REPORT_CONFIG_FILE.exists():
+        _REPORT_CONFIG_CACHE = config
+        return config
+
+    try:
+        with REPORT_CONFIG_FILE.open("r", encoding="utf-8") as f:
+            raw = f.read().splitlines()
+        for line in raw:
+            line = line.strip()
+            if not line or line.startswith("#") or line.startswith(";"):
+                continue
+            if line.startswith("export "):
+                line = line[7:].strip()
+            if "=" not in line:
+                continue
+            key, value = line.split("=", 1)
+            key = key.strip()
+            value = value.strip().strip().strip("'").strip('"')
+            if key:
+                config[key] = value
+    except Exception:
+        config = {}
+    _REPORT_CONFIG_CACHE = config
+    return config
+
+
 def _read_env_first(*names: str, default: str = "") -> str:
     for name in names:
         value = os.getenv(name, "")
@@ -38,6 +76,10 @@ def _read_env_first(*names: str, default: str = "") -> str:
             value = value.strip()
             if value:
                 return value
+    for name in names:
+        value = _load_report_config().get(name, "").strip()
+        if value:
+            return value
     return default.strip()
 
 
@@ -65,11 +107,23 @@ def _read_int_env(*names: str, default: int = 0) -> int:
     return default
 
 
+class DailyBriefTimeout(TimeoutError):
+    pass
+
+
 STATE_FILE = Path(__file__).with_name("daily_ai_brief_state.json")
 REPORT_OUTPUT_DIR = Path(__file__).with_name("report")
 MAX_RECORDS = 14
 RELATED_WINDOW_DAYS = 7
 DAILY_AI_BRIEF_CATCHUP_DAYS = max(1, _read_int_env("DAILY_AI_BRIEF_CATCHUP_DAYS", "BACKFILL_DAYS", default=3))
+DAILY_AI_BRIEF_MAX_RUNTIME_SECONDS = max(
+    0,
+    _read_int_env(
+        "DAILY_AI_BRIEF_MAX_RUNTIME_SECONDS",
+        "DAILY_AI_BRIEF_TIMEOUT_SECONDS",
+        default=3600,
+    ),
+)
 SOURCE_URLS = {
     "openai_rss": "https://openai.com/feed/",
     "openai_news_rss": "https://openai.com/news/rss.xml",
@@ -88,6 +142,44 @@ SOURCE_URLS = {
     "claude_blog": "https://claude.com/blog",
     "openai_research": "https://openai.com/zh-Hant-HK/research/index/",
 }
+
+# Avoid repeatedly hitting the same dead Twitter RSS mirror for every account
+# during a single run. This keeps one broken instance from stalling the whole
+# automation.
+FAILED_TWITTER_RSS_INSTANCES: set[str] = set()
+
+
+def _runtime_timeout_message() -> str:
+    return f"运行超过限制 {DAILY_AI_BRIEF_MAX_RUNTIME_SECONDS} 秒，已停止后续抓取与邮件发送"
+
+
+def _run_timeout_handler(signum, frame):
+    raise DailyBriefTimeout(_runtime_timeout_message())
+
+
+def _install_runtime_timeout():
+    if DAILY_AI_BRIEF_MAX_RUNTIME_SECONDS <= 0:
+        return None
+    if not hasattr(signal, "SIGALRM") or not hasattr(signal, "setitimer"):
+        return None
+    previous = signal.getsignal(signal.SIGALRM)
+    signal.signal(signal.SIGALRM, _run_timeout_handler)
+    signal.setitimer(signal.ITIMER_REAL, DAILY_AI_BRIEF_MAX_RUNTIME_SECONDS)
+    return previous
+
+
+def _clear_runtime_timeout(previous):
+    if previous is None:
+        return
+    signal.setitimer(signal.ITIMER_REAL, 0)
+    signal.signal(signal.SIGALRM, previous)
+
+
+def _check_runtime_deadline(started_at: float):
+    if DAILY_AI_BRIEF_MAX_RUNTIME_SECONDS <= 0:
+        return
+    if time.monotonic() - started_at >= DAILY_AI_BRIEF_MAX_RUNTIME_SECONDS:
+        raise DailyBriefTimeout(_runtime_timeout_message())
 DEFAULT_PRIORITY_CHANNEL_BROWSER_SNAPSHOT = str(Path(__file__).with_name("daily_ai_brief_browser_snapshot.json"))
 PRIORITY_CHANNEL_BROWSER_SNAPSHOT_PATH = os.getenv("PRIORITY_CHANNEL_BROWSER_SNAPSHOT_PATH", DEFAULT_PRIORITY_CHANNEL_BROWSER_SNAPSHOT).strip()
 PRIORITY_CHANNELS = [
@@ -96,11 +188,24 @@ PRIORITY_CHANNELS = [
 ]
 PRIORITY_CHANNEL_LOOKBACK_DAYS = 7
 PRIORITY_CHANNEL_MAX_SUMMARY_CHARS = 220
+GITHUB_TREND_MIN_STARS = max(0, _read_int_env("DAILY_AI_BRIEF_GITHUB_TREND_MIN_STARS", "GITHUB_TREND_MIN_STARS", default=1200))
+GITHUB_TREND_MIN_DELTA = max(0, _read_int_env("DAILY_AI_BRIEF_GITHUB_TREND_MIN_DELTA", "GITHUB_TREND_MIN_DELTA", default=180))
+GITHUB_TREND_MIN_DELTA_PERCENT = max(0, _read_int_env("DAILY_AI_BRIEF_GITHUB_TREND_MIN_DELTA_PERCENT", "GITHUB_TREND_MIN_DELTA_PERCENT", default=4))
+GITHUB_TREND_RETURN_LIMIT = max(12, _read_int_env("DAILY_AI_BRIEF_GITHUB_TREND_RETURN_LIMIT", "GITHUB_TREND_RETURN_LIMIT", default=18))
+GITHUB_TREND_REPORT_LIMIT = max(6, _read_int_env("DAILY_AI_BRIEF_GITHUB_TREND_REPORT_LIMIT", "GITHUB_TREND_REPORT_LIMIT", default=8))
 OPENAI_SEARCH_API_URL = os.getenv("OPENAI_SEARCH_API_URL", "https://api.openai.com/v1/responses")
 OPENAI_SEARCH_MODEL = os.getenv("OPENAI_SEARCH_MODEL", "gpt-4.1-mini")
 OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "").strip()
 TAVILY_CLI = os.getenv("TAVILY_CLI", "tvly").strip() or "tvly"
 AI_SEARCH_MAX_ITEMS_PER_PROVIDER = 4
+AI_SEARCH_MAX_SECONDS = max(
+    0,
+    _read_int_env(
+        "DAILY_AI_BRIEF_AI_SEARCH_MAX_SECONDS",
+        "AI_SEARCH_MAX_SECONDS",
+        default=30,
+    ),
+)
 AI_SEARCH_SKIP_TAVILY = _read_env_first(
     "DAILY_AI_BRIEF_SKIP_TAVILY_SEARCH",
     "DAILY_AI_BRIEF_DISABLE_TAVILY",
@@ -115,8 +220,19 @@ AI_SEARCH_QUERIES = [
     "AI 开放协议 与 MCP",
     "OpenAI 最新 AGI 研究",
 ]
+AI_SEARCH_ENHANCED_QUERIES = [
+    "AI Agents 最新发布",
+    "MCP 工具调用 框架",
+    "Agent Orchestration 平台",
+    "GitHub AI 开源项目 星标 增长",
+    "多智能体 工作流 系统",
+]
 FALLBACK_SEARCH_URL = "https://duckduckgo.com/html/?q="
 WECHAT_TOP20_GZH_URL = "https://aigcrank.cn/top/202412gzh"
+WECHAT_TOP20_GZH_URLS = [
+    WECHAT_TOP20_GZH_URL,
+    "https://www.aigcrank.cn/top/202412gzh",
+]
 TWITTER_RSS_INSTANCES = [
     "https://rsshub.app",
     "https://rsshub.rssforever.com",
@@ -127,16 +243,26 @@ TWITTER_RSS_INSTANCES = [
 ]
 TWITTER_TECH_ACCOUNTS = [
     {"name": "Microsoft", "handle": "Microsoft"},
-    {"name": "Apple", "handle": "Apple"},
+    {"name": "Microsoft Research", "handle": "MSFTResearch"},
     {"name": "Google", "handle": "Google"},
-    {"name": "Amazon", "handle": "amazon"},
+    {"name": "Google DeepMind", "handle": "GoogleDeepMind"},
     {"name": "Meta", "handle": "Meta"},
+    {"name": "Meta AI", "handle": "MetaAI"},
+    {"name": "Amazon Science", "handle": "AmazonScience"},
     {"name": "NVIDIA", "handle": "NVIDIA"},
+    {"name": "NVIDIA AI", "handle": "NVIDIAAI"},
+    {"name": "OpenAI", "handle": "OpenAI"},
+    {"name": "Anthropic", "handle": "AnthropicAI"},
 ]
 BROKER_REPORT_TEMPLATES = [
     "https://stock.finance.sina.com.cn/stock/go.php/vReport_List/kind/search/index.phtml?orgname={org}&industry=&symbol=&t1=all&title=",
     "https://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/index.phtml?orgname={org}&industry=&symbol=&t1=all&title=",
 ]
+BROKER_REPORT_SEARCH_TEMPLATES = [
+    "https://stock.finance.sina.com.cn/stock/go.php/vReport_List/kind/search/index.phtml?orgname=&industry=&symbol=&t1=all&title={query}",
+    "https://stock.finance.sina.com.cn/stock/go.php/vReport_Show/kind/search/index.phtml?orgname=&industry=&symbol=&t1=all&title={query}",
+]
+BROKER_REPORT_SEARCH_QUERIES = ["AI", "人工智能", "大模型", "算力", "Agent", "AIGC"]
 BROKER_REPORT_SOURCES = [
     {"name": "中信证券", "type": "sina_report"},
     {"name": "中信建投证券", "type": "sina_report"},
@@ -195,6 +321,237 @@ def append_source_link(items: List[Dict[str, object]]) -> List[Dict[str, object]
             item["link"] = github_repo_link(repo)
         out.append(item)
     return out
+
+
+def _normalize_similarity_text(value: object) -> str:
+    text = strip_html(str(value or "")).lower()
+    text = unescape(text)
+    text = re.sub(r"https?://\S+", " ", text)
+    text = re.sub(r"utm_[a-z0-9_]+=[^&\s]+", " ", text)
+    text = re.sub(r"[^\w\u4e00-\u9fff]+", " ", text)
+    return re.sub(r"\s+", " ", text).strip()
+
+
+def _item_similarity_text(item: Dict[str, object]) -> str:
+    fields = (
+        "title",
+        "summary",
+        "raw",
+        "snippet",
+        "description",
+        "coreIdea",
+        "value",
+        "highlights",
+        "repo",
+        "source",
+    )
+    return " ".join(_normalize_similarity_text(item.get(field, "")) for field in fields).strip()
+
+
+def _similarity_tokens(text: str) -> set[str]:
+    text = _normalize_similarity_text(text)
+    tokens = re.findall(r"[a-z0-9][a-z0-9_.-]{1,}|[\u4e00-\u9fff]", text)
+    stopwords = {
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "this",
+        "that",
+        "you",
+        "your",
+        "are",
+        "is",
+        "to",
+        "of",
+        "in",
+        "on",
+        "ai",
+        "人工智能",
+    }
+    return {t for t in tokens if t and t not in stopwords}
+
+
+def _jaccard_similarity(a: str, b: str) -> float:
+    left = _similarity_tokens(a)
+    right = _similarity_tokens(b)
+    if not left or not right:
+        return 0.0
+    return len(left & right) / max(1, len(left | right))
+
+
+def _item_exact_key(item: Dict[str, object]) -> str:
+    repo = _normalize_similarity_text(item.get("repo", ""))
+    link = _normalize_similarity_text(item.get("link", ""))
+    title = _normalize_similarity_text(item.get("title", ""))
+    source = _normalize_similarity_text(item.get("source", ""))
+    if repo:
+        return f"repo:{repo}"
+    if link:
+        return f"link:{link}"
+    return f"title:{title}|source:{source}"
+
+
+def _dedupe_similar_items(
+    items: List[Dict[str, object]],
+    threshold: float = 0.82,
+    max_items: int | None = None,
+) -> tuple[List[Dict[str, object]], int]:
+    deduped: List[Dict[str, object]] = []
+    seen_exact: set[str] = set()
+    seen_texts: List[str] = []
+    removed = 0
+    for index, raw in enumerate(items):
+        if not isinstance(raw, dict):
+            continue
+        item = dict(raw)
+        key = _item_exact_key(item)
+        if key and key in seen_exact:
+            removed += 1
+            continue
+        text = _item_similarity_text(item)
+        if text and any(_jaccard_similarity(text, prev) >= threshold for prev in seen_texts):
+            removed += 1
+            continue
+        if key:
+            seen_exact.add(key)
+        if text:
+            seen_texts.append(text)
+        deduped.append(item)
+        if max_items is not None and len(deduped) >= max_items:
+            removed += max(0, len(items) - index - 1)
+            break
+    return deduped, removed
+
+
+def _dedupe_priority_channels(blocks: List[Dict[str, object]]) -> tuple[List[Dict[str, object]], int]:
+    out: List[Dict[str, object]] = []
+    removed = 0
+    seen_texts: List[str] = []
+    seen_exact: set[str] = set()
+    for block in blocks:
+        if not isinstance(block, dict):
+            continue
+        items = block.get("items", [])
+        if not isinstance(items, list):
+            out.append(block)
+            continue
+        next_items: List[Dict[str, object]] = []
+        for raw in items:
+            if not isinstance(raw, dict):
+                continue
+            item = dict(raw)
+            key = _item_exact_key(item)
+            text = _item_similarity_text(item)
+            if key and key in seen_exact:
+                removed += 1
+                continue
+            if text and any(_jaccard_similarity(text, prev) >= 0.82 for prev in seen_texts):
+                removed += 1
+                continue
+            if key:
+                seen_exact.add(key)
+            if text:
+                seen_texts.append(text)
+            next_items.append(item)
+        if next_items:
+            next_block = dict(block)
+            next_block["items"] = next_items
+            out.append(next_block)
+        else:
+            removed += len(items)
+    return out, removed
+
+
+def _dedupe_report_content(report: Dict[str, object]) -> Dict[str, object]:
+    cleaned = dict(report)
+    summary: Dict[str, int] = {}
+
+    priority_input = cleaned.get("priorityChannelHighlights", [])
+    priority, removed = _dedupe_priority_channels(priority_input if isinstance(priority_input, list) else [])
+    cleaned["priorityChannelHighlights"] = priority
+    if removed:
+        summary["priorityChannelHighlights"] = removed
+
+    list_fields = {
+        "aiHighlights": 0.82,
+        "trendProjects": 0.86,
+        "twitterUpdates": 0.82,
+        "brokerReports": 0.82,
+        "relatedSignals": 0.82,
+    }
+    for field, threshold in list_fields.items():
+        items = cleaned.get(field, [])
+        if not isinstance(items, list):
+            continue
+        deduped, removed = _dedupe_similar_items([i for i in items if isinstance(i, dict)], threshold=threshold)
+        cleaned[field] = deduped
+        if field == "trendProjects":
+            cleaned["trendLinks"] = deduped
+        if removed:
+            summary[field] = removed
+
+    focused = []
+    focused_removed = 0
+    focused_input = cleaned.get("focusedSignals", [])
+    for block in focused_input if isinstance(focused_input, list) else []:
+        if not isinstance(block, dict):
+            continue
+        items = block.get("items", [])
+        if not isinstance(items, list):
+            focused.append(block)
+            continue
+        deduped, removed = _dedupe_similar_items([i for i in items if isinstance(i, dict)], threshold=0.82, max_items=4)
+        focused_removed += removed
+        if deduped:
+            next_block = dict(block)
+            next_block["items"] = deduped
+            focused.append(next_block)
+    cleaned["focusedSignals"] = focused
+    if focused_removed:
+        summary["focusedSignals"] = focused_removed
+
+    cleaned["dedupeSummary"] = summary
+    return cleaned
+
+
+def _github_short_description(project: Dict[str, object], limit: int = 30) -> str:
+    text = str(
+        project.get("shortDescription")
+        or project.get("description")
+        or project.get("highlights")
+        or project.get("why")
+        or ""
+    ).strip()
+    repo = str(project.get("repo", "")).strip()
+    if not text:
+        repo_text = repo.lower().replace("-", " ").replace("_", " ")
+        keyword_map = [
+            (("agent", "agents"), "智能体应用或编排工具"),
+            (("memory", "mem"), "AI记忆与上下文管理"),
+            (("mcp",), "MCP工具接入服务"),
+            (("rag", "retrieval", "search"), "检索增强与知识问答"),
+            (("code", "coding", "dev"), "代码理解与开发提效"),
+            (("human", "avatar"), "个人AI助手或数字人"),
+            (("research", "academic"), "研究资料整理工具"),
+            (("presentation", "slide", "ppt", "marp"), "演示文稿生成工具"),
+            (("image", "video", "montage"), "图像视频生成编辑"),
+            (("hiring", "interview"), "招聘面试智能体"),
+        ]
+        for keys, desc in keyword_map:
+            if any(key in repo_text for key in keys):
+                text = desc
+                break
+    if not text:
+        name = repo.split("/")[-1] if repo else "该项目"
+        text = f"{name}开源项目"
+    text = strip_html(unescape(text))
+    text = re.sub(r"https?://\S+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip(" -｜:：。.")
+    if not text:
+        text = "开源项目趋势观察"
+    return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
 EMAIL_RECIPIENT = _read_env_first("DAILY_AI_BRIEF_EMAIL_TO", "EMAIL_TO_ADDRESSES", "EMAIL_TO")
 EMAIL_SMTP_HOST = _read_env_first("DAILY_AI_BRIEF_SMTP_HOST", "SMTP_HOST", "EMAIL_SMTP_HOST", default="smtp.gmail.com")
@@ -273,6 +630,31 @@ SKILL_CATEGORIES = {
             "open-webui/open-webui",
         ],
     },
+    "agent_orchestration": {
+        "title": "Agent 产品与编排",
+        "description": "偏向Agent Team、Multi-Agent、任务编排与协作链路产品化能力。",
+        "keywords": [
+            "agent",
+            "agentic",
+            "multi-agent",
+            "multi agent",
+            "agent team",
+            "orchestration",
+            "workflow",
+            "mcp",
+            "tool use",
+            "routing",
+            "task",
+            "multica",
+        ],
+        "fallback": [
+            "microsoft/autogen",
+            "ag2ai/ag2",
+            "crewAIInc/crewAI",
+            "langchain-ai/langgraph",
+            "openai/swarm",
+        ],
+    },
     "ppt_skill": {
         "title": "PPT技巧",
         "description": "偏向展示产出、演讲材料、知识传播的高效模板和生成工具。",
@@ -285,18 +667,6 @@ SKILL_CATEGORIES = {
             "revealjs/reveal",
         ],
     },
-    "earning": {
-        "title": "赚钱相关",
-        "description": "偏向变现、效率变现链路或商业化场景落地。",
-        "keywords": ["automation", "workflow", "marketing", "commerce", "affiliate", "saas", "finance", "revenue", "monetize", "payment"],
-        "fallback": [
-            "langfuse/langfuse",
-            "arize-ai/phoenix",
-            "llamaindex/llama-index",
-            "deepset-ai/haystack",
-            "OpenPipe/OpenPipe",
-        ],
-    },
 }
 
 FOCUSED_FIELDS = {
@@ -305,7 +675,27 @@ FOCUSED_FIELDS = {
         "keywords": ["ag-ui", "agent ui", "agent-ui", "ui protocol", "tool call ui", "human loop", "handoff"],
     },
     "ai_map": {"title": "AI地图", "keywords": ["map", "knowledge map", "graph", "knowledge graph", "topology", "agent map"]},
-    "ai_search": {"title": "AI搜索", "keywords": ["search", "retrieval", "rerank", "vector", "recall", "index"]},
+    "ai_search": {
+        "title": "AI检索与RAG",
+        "keywords": ["search", "retrieval", "rerank", "vector", "recall", "index", "bm25", "embedding", "ai search", "rag"],
+    },
+    "agent_orchestration": {
+        "title": "Agent Team / 编排产品",
+        "keywords": [
+            "agent",
+            "agentic",
+            "multi-agent",
+            "multi agent",
+            "agent team",
+            "orchestration",
+            "workflow",
+            "agent framework",
+            "routing",
+            "planner",
+            "mcp",
+            "multica",
+        ],
+    },
     "ai_image": {"title": "AI生图", "keywords": ["text-to-image", "image generation", "diffusion", "sdxl", "flux", "midjourney", "image model"]},
 }
 
@@ -314,9 +704,20 @@ def fetch_url(url: str, timeout: int = 12) -> str:
     req = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0 (X11; Linux x86_64)"})
     try:
         with urllib.request.urlopen(req, timeout=timeout) as resp:
-            return resp.read().decode("utf-8", errors="ignore")
+            raw = resp.read()
+            content_type = resp.headers.get("Content-Type", "")
+            return _decode_response_bytes(raw, content_type)
     except Exception as exc:
-        return f"__ERROR__:{exc}"
+        # Nitter/RSSHub are the flakiest sources in this workflow. If the primary
+        # request already timed out or failed, skip the curl fallback so one bad
+        # mirror does not stall the whole daily run.
+        lowered_url = url.lower()
+        if "nitter." in lowered_url or "rsshub." in lowered_url:
+            return f"__ERROR__:{exc}"
+        fallback = _curl_fetch_url(url, timeout=timeout)
+        if not fallback.startswith("__ERROR__"):
+            return fallback
+        return f"__ERROR__:{exc}; curl_fallback={fallback}"
 
 
 def fetch_first_success(urls: List[str], timeout: int = 12) -> str:
@@ -333,6 +734,46 @@ def strip_html(html_text: str) -> str:
     no_tags = re.sub(r"<[^>]+>", "", html_text or "")
     no_tags = unescape(no_tags)
     return re.sub(r"\s+", " ", no_tags).strip()
+
+
+def _decode_response_bytes(raw: bytes, content_type: str = "") -> str:
+    charsets: List[str] = []
+    match = re.search(r"charset=([A-Za-z0-9._-]+)", content_type or "", flags=re.I)
+    if match:
+        charsets.append(match.group(1).strip().lower())
+    charsets.extend(["utf-8", "utf-8-sig", "gb18030", "gbk", "gb2312", "big5", "latin-1"])
+    seen: set[str] = set()
+    for charset in charsets:
+        if not charset or charset in seen:
+            continue
+        seen.add(charset)
+        try:
+            return raw.decode(charset)
+        except Exception:
+            continue
+    return raw.decode("utf-8", errors="ignore")
+
+
+def _curl_fetch_url(url: str, timeout: int = 12) -> str:
+    cmd = [
+        "curl",
+        "-LksS",
+        "--connect-timeout",
+        str(max(1, min(timeout, 5))),
+        "--max-time",
+        str(max(1, timeout)),
+        "-A",
+        "Mozilla/5.0 (X11; Linux x86_64)",
+        url,
+    ]
+    try:
+        completed = subprocess.run(cmd, capture_output=True, timeout=max(2, timeout + 2), check=False)
+    except Exception as exc:
+        return f"__ERROR__:{exc}"
+    if completed.returncode != 0:
+        err = completed.stderr.decode("utf-8", errors="ignore").strip()
+        return f"__ERROR__:curl_exit_{completed.returncode}:{err}"
+    return _decode_response_bytes(completed.stdout)
 
 
 def _post_json(url: str, payload: Dict[str, object], headers: Dict[str, str] | None = None) -> str:
@@ -528,16 +969,116 @@ def _collect_from_priority_snapshot(source_key: str, now: datetime) -> List[Dict
     return out
 
 
+def _extract_json_values(payload: object, target_fields: List[str]) -> str:
+    target = {str(f).lower() for f in target_fields}
+
+    def _walk(node: object) -> str:
+        if isinstance(node, dict):
+            for key, value in node.items():
+                if str(key).lower() in target and isinstance(value, str) and value.strip():
+                    return value.strip()
+                found = _walk(value)
+                if found:
+                    return found
+        elif isinstance(node, list):
+            for item in node[:12]:
+                found = _walk(item)
+                if found:
+                    return found
+        return ""
+
+    return _walk(payload)
+
+
+def _extract_structured_meta(html_text: str, keys: List[str]) -> str:
+    if not html_text:
+        return ""
+    scripts = (
+        r'<script[^>]+type=["\']application/ld\+json["\'][^>]*>(.*?)</script>',
+        r'<script[^>]+type=["\']application/json["\'][^>]*>(.*?)</script>',
+    )
+    for pattern in scripts:
+        for m in re.finditer(pattern, html_text, flags=re.I | re.S):
+            raw = unescape(m.group(1)).strip()
+            if not raw or not (raw.startswith("{") or raw.startswith("[")):
+                continue
+            try:
+                payload = json.loads(raw)
+            except Exception:
+                continue
+            text = _extract_json_values(payload, keys)
+            if text:
+                return text
+    return ""
+
+
+def _extract_meta_by_name(html_text: str, names: List[str]) -> str:
+    if not html_text:
+        return ""
+    names = [re.escape(n.lower()) for n in names]
+    key_pat = "|".join(names)
+    for matcher in (
+        re.finditer(
+            rf'<meta[^>]+(?:property|name|itemprop)=["\'](?:{key_pat})["\'][^>]*content=["\']([^"\']+)["\']',
+            html_text,
+            flags=re.I | re.S,
+        ),
+        re.finditer(
+            rf'<meta[^>]+content=["\']([^"\']+)["\'][^>]*(?:property|name|itemprop)=["\'](?:{key_pat})["\']',
+            html_text,
+            flags=re.I | re.S,
+        ),
+    ):
+        for match in matcher:
+            value = match.group(1).strip()
+            if value:
+                return strip_html(value)
+    return ""
+
+
+def _extract_page_title(html_text: str, fallback: str = "Untitled") -> str:
+    if not html_text:
+        return fallback
+    parsed = _extract_structured_meta(html_text, ["headline", "name", "title"])
+    if parsed:
+        return strip_html(parsed)
+    parsed = _extract_meta_by_name(html_text, ["og:title", "twitter:title"])
+    if parsed:
+        return parsed
+    match = re.search(r"<title[^>]*>(.*?)</title>", html_text, flags=re.I | re.S)
+    if match:
+        parsed = strip_html(match.group(1))
+        if parsed:
+            return parsed
+    return fallback
+
+
+def _extract_page_summary(html_text: str) -> str:
+    structured = _extract_structured_meta(html_text, ["description", "abstract", "articleBody", "summary", "headline"])
+    if structured:
+        return strip_html(structured)
+    structured = _extract_meta_by_name(html_text, ["description", "og:description", "twitter:description", "itemprop:description"])
+    if structured:
+        return structured
+    return ""
+
+
 def _extract_published_time(html_text: str) -> str:
     if not html_text:
         return ""
+    structured = _extract_structured_meta(html_text, ["datePublished", "dateModified", "dateCreated"])
+    if structured:
+        return structured
     patterns = [
         r'<time[^>]*datetime=["\']([^"\']+)["\']',
         r'property=["\']article:published_time["\'][^>]*content=["\']([^"\']+)["\']',
         r'name=["\']publish_date["\'][^>]*content=["\']([^"\']+)["\']',
         r'name=["\']date["\'][^>]*content=["\']([^"\']+)["\']',
+        r"'datePublished'\s*:\s*'([^']+)'",
         r'"datePublished"\s*:\s*"([^"]+)"',
+        r"'dateModified'\s*:\s*'([^']+)'",
         r'"dateModified"\s*:\s*"([^"]+)"',
+        r"'dateCreated'\s*:\s*'([^']+)'",
         r'"dateCreated"\s*:\s*"([^"]+)"',
         r'content=["\']([^"\']+)\s*T\d{2}:\d{2}:\d{2}[^"\']*["\'][^>]*itemprop=["\']datePublished["\']',
     ]
@@ -557,6 +1098,10 @@ def _extract_main_content_html(html_text: str) -> str:
         r"<main[^>]*>(.*?)</main>",
         r"<section[^>]*>(.*?)</section>",
         r"<div[^>]*class=[\"']([^\"']*(?:article|post|content|entry|markdown-body|docs-content|blog-post|post-content)[^\"']*)[\"'][^>]*>(.*?)</div>",
+        r"<div[^>]*class=['\"][^\"']*(?:prose|mdx-content|post-content-wrap|blog-content|article-content)[^\"']*['\"][^>]*>(.*?)</div>",
+        r"<main[^>]*class=['\"][^\"']*(?:post|content|article|blog)[^\"']*['\"][^>]*>(.*?)</main>",
+        r"<section[^>]*class=['\"][^\"']*(?:post|article|content|entry|blog)[^\"']*['\"][^>]*>(.*?)</section>",
+        r"<div[^>]*id=['\"][^\"']*(?:post|content|article|blog)[^\"']*['\"][^>]*>(.*?)</div>",
     ]
     for p in patterns:
         for m in re.finditer(p, html_text, flags=re.I | re.S):
@@ -638,6 +1183,9 @@ def _extract_abstract(html_text: str) -> str:
         m = re.search(p, html_text, flags=re.I | re.S)
         if m and m.group(1).strip():
             return strip_html(m.group(1).strip())
+    structured = _extract_structured_meta(html_text, ["description", "abstract", "articleBody"])
+    if structured:
+        return strip_html(structured)
     for p in [
         r'<p[^>]*>(.*?)</p>',
         r'<div[^>]+class=["\'][^"\']*prose[^"\']*["\'][^>]*>(.*?)</div>',
@@ -876,6 +1424,8 @@ def _collect_priority_channel_articles(
         if item_html.startswith("__ERROR__"):
             continue
         item_body = _extract_main_content_html(item_html)
+        metadata_title = _extract_page_title(item_html)
+        metadata_summary = _extract_page_summary(item_html)
         published = _extract_published_time(item_html)
         dt = _parse_time(published)
         if not dt:
@@ -884,8 +1434,8 @@ def _collect_priority_channel_articles(
         if dt < now - timedelta(days=PRIORITY_CHANNEL_LOOKBACK_DAYS):
             continue
         title_match = re.search(r"<title[^>]*>(.*?)</title>", item_html, flags=re.I | re.S)
-        raw_title = strip_html(title_match.group(1)) if title_match else "Untitled"
-        raw_summary = _extract_article_text(item_body) or _extract_abstract(item_html)
+        raw_title = metadata_title or (strip_html(title_match.group(1)) if title_match else "Untitled")
+        raw_summary = metadata_summary or _extract_article_text(item_body) or _extract_abstract(item_html)
         raw_image = _extract_first_image(item_html)
         arch_nodes = _derive_architecture_nodes(raw_title, raw_summary, item_body, item_html)
         arch_points = _extract_architecture_highlights(item_body or item_html)
@@ -916,9 +1466,9 @@ def _collect_priority_channel_articles(
     if not out and fallback:
         for link, item_html in fallback[:max_items]:
             title_match = re.search(r"<title[^>]*>(.*?)</title>", item_html, flags=re.I | re.S)
-            raw_title = strip_html(title_match.group(1)) if title_match else "Untitled"
+            raw_title = _extract_page_title(item_html, fallback=(strip_html(title_match.group(1)) if title_match else "Untitled"))
             fallback_body = _extract_main_content_html(item_html)
-            raw_summary = _extract_article_text(fallback_body) or _extract_abstract(item_html)
+            raw_summary = _extract_page_summary(item_html) or _extract_article_text(fallback_body) or _extract_abstract(item_html)
             raw_image = _extract_first_image(item_html)
             arch_nodes = _derive_architecture_nodes(raw_title, raw_summary, fallback_body, item_html)
             arch_points = _extract_architecture_highlights(fallback_body or item_html)
@@ -1099,20 +1649,41 @@ def _collect_tavily_search(query: str) -> List[Dict[str, object]]:
     return out[:AI_SEARCH_MAX_ITEMS_PER_PROVIDER]
 
 
-def collect_ai_search_updates() -> List[Dict[str, object]]:
+def collect_ai_search_updates(
+    queries: List[str] | None = None,
+    allow_openai: bool = True,
+    allow_ddg_fallback: bool = True,
+) -> List[Dict[str, object]]:
+    if queries is None:
+        queries = AI_SEARCH_QUERIES
+    if not queries:
+        return []
+
+    query_list = list(dict.fromkeys([q.strip() for q in queries if q.strip()]))
+    if not query_list:
+        return []
     out: List[Dict[str, object]] = []
     seen: set[str] = set()
+    started_at = time.monotonic()
 
-    for q in AI_SEARCH_QUERIES:
-        items = _collect_openai_search(q)
-        for item in items:
-            key = f"{item.get('title')}|{item.get('source')}"
-            if key in seen:
-                continue
-            seen.add(key)
-            out.append(item)
+    def timed_out() -> bool:
+        return AI_SEARCH_MAX_SECONDS > 0 and (time.monotonic() - started_at) >= AI_SEARCH_MAX_SECONDS
 
-    for q in AI_SEARCH_QUERIES:
+    if allow_openai:
+        for q in query_list:
+            if timed_out():
+                return out[:AI_SEARCH_MAX_ITEMS_PER_PROVIDER * 2]
+            items = _collect_openai_search(q)
+            for item in items:
+                key = f"{item.get('title')}|{item.get('source')}"
+                if key in seen:
+                    continue
+                seen.add(key)
+                out.append(item)
+
+    for q in query_list:
+        if timed_out():
+            return out[:AI_SEARCH_MAX_ITEMS_PER_PROVIDER * 2]
         items = _collect_tavily_search(q)
         for item in items:
             key = f"{item.get('title')}|{item.get('source')}"
@@ -1123,8 +1694,10 @@ def collect_ai_search_updates() -> List[Dict[str, object]]:
             if len(out) >= AI_SEARCH_MAX_ITEMS_PER_PROVIDER * 2:
                 return out[:AI_SEARCH_MAX_ITEMS_PER_PROVIDER * 2]
 
-    if not out:
-        for q in AI_SEARCH_QUERIES:
+    if allow_ddg_fallback and not out:
+        for q in query_list:
+            if timed_out():
+                return out[:AI_SEARCH_MAX_ITEMS_PER_PROVIDER * 2]
             items = _collect_ddg_search(q)
             for item in items:
                 key = f"{item.get('title')}|{item.get('source')}"
@@ -1132,7 +1705,40 @@ def collect_ai_search_updates() -> List[Dict[str, object]]:
                     continue
                 seen.add(key)
                 out.append(item)
+                if len(out) >= AI_SEARCH_MAX_ITEMS_PER_PROVIDER * 2:
+                    return out[:AI_SEARCH_MAX_ITEMS_PER_PROVIDER * 2]
     return out[:AI_SEARCH_MAX_ITEMS_PER_PROVIDER * 2]
+
+
+def collect_ai_search_updates_with_enhancement() -> List[Dict[str, object]]:
+    started_at = time.monotonic()
+
+    def remaining_budget() -> bool:
+        return AI_SEARCH_MAX_SECONDS <= 0 or (time.monotonic() - started_at) < AI_SEARCH_MAX_SECONDS
+
+    updates = collect_ai_search_updates()
+    if updates:
+        return updates
+    if not remaining_budget():
+        return []
+
+    enhanced = collect_ai_search_updates(
+        queries=AI_SEARCH_ENHANCED_QUERIES,
+        allow_openai=False,
+        allow_ddg_fallback=True,
+    )
+    if enhanced:
+        return enhanced
+    if not remaining_budget():
+        return []
+
+    # 最后再尝试使用更宽泛的关键词再次抓一次，尽量避免空内容
+    broadened = AI_SEARCH_QUERIES + AI_SEARCH_ENHANCED_QUERIES
+    return collect_ai_search_updates(
+        queries=broadened,
+        allow_openai=False,
+        allow_ddg_fallback=True,
+    )
 
 
 def parse_openai_rss() -> List[Dict[str, str]]:
@@ -1200,65 +1806,117 @@ def parse_rss_feed_signals_custom(
         text = fetch_url(feed_url)
         if text.startswith("__ERROR__"):
             continue
-        items: List[Dict[str, str]] = []
-        blocks = []
-        blocks.extend(re.finditer(r"<item>(.*?)</item>", text, re.S | re.I))
-        blocks.extend(re.finditer(r"<entry>(.*?)</entry>", text, re.S | re.I))
-        if not blocks:
-            continue
-
-        keywords = [k.lower() for k in (keyword_filter or [])]
-        for block_match in blocks:
-            block = block_match.group(1)
-            title = re.search(
-                r"<title><!\[CDATA\[(.*?)\]\]></title>|<title>(.*?)</title>|<title\s+type=\"text\">(.*?)</title>",
-                block,
-                re.S | re.I,
-            )
-            link = re.search(r"<link[^>]*>(.*?)</link>|<link[^>]*href=[\"']([^\"']+)[\"']", block, re.S | re.I)
-            pub = re.search(r"<pubDate>(.*?)</pubDate>|<updated>(.*?)</updated>|<published>(.*?)</published>", block, re.S | re.I)
-            t = strip_html((title.group(1) or title.group(2) or title.group(3)) if title else "")
-            if not t:
-                continue
-            low = t.lower()
-            if keywords and not any(k in low for k in keywords):
-                continue
-            raw = t[:220]
-            raw = re.sub(r"\s+", " ", raw).strip()
-            link_value = ""
-            if link:
-                link_value = (link.group(1) or link.group(2) or "").strip()
-            if not link_value:
-                link_value = feed_url
-            pub_value = ""
-            if pub:
-                pub_value = strip_html((pub.group(1) or pub.group(2) or pub.group(3) or "")).strip()
-            items.append(
-                {
-                    "title": t,
-                    "source": source_name,
-                    "link": link_value,
-                    "time": pub_value,
-                    "raw": raw,
-                }
-            )
-            if len(items) >= max_items:
-                break
+        items = _parse_rss_feed_items(
+            text=text,
+            source_name=source_name,
+            keyword_filter=keyword_filter,
+            max_items=max_items,
+            fallback_link=feed_url,
+        )
         if items:
             return items
     return []
 
 
+def _parse_rss_feed_items(
+    text: str,
+    source_name: str,
+    keyword_filter: List[str] | None = None,
+    max_items: int = 8,
+    fallback_link: str = "",
+) -> List[Dict[str, str]]:
+    items: List[Dict[str, str]] = []
+    blocks = []
+    blocks.extend(re.finditer(r"<item>(.*?)</item>", text, re.S | re.I))
+    blocks.extend(re.finditer(r"<entry>(.*?)</entry>", text, re.S | re.I))
+    if not blocks:
+        return []
+
+    keywords = [k.lower() for k in (keyword_filter or [])]
+    for block_match in blocks:
+        block = block_match.group(1)
+        title = re.search(
+            r"<title><!\[CDATA\[(.*?)\]\]></title>|<title>(.*?)</title>|<title\s+type=\"text\">(.*?)</title>",
+            block,
+            re.S | re.I,
+        )
+        link = re.search(r"<link[^>]*>(.*?)</link>|<link[^>]*href=[\"']([^\"']+)[\"']", block, re.S | re.I)
+        pub = re.search(r"<pubDate>(.*?)</pubDate>|<updated>(.*?)</updated>|<published>(.*?)</published>", block, re.S | re.I)
+        t = strip_html((title.group(1) or title.group(2) or title.group(3)) if title else "")
+        if not t:
+            continue
+        low = t.lower()
+        if keywords and not any(k in low for k in keywords):
+            continue
+        raw = t[:220]
+        raw = re.sub(r"\s+", " ", raw).strip()
+        link_value = ""
+        if link:
+            link_value = (link.group(1) or link.group(2) or "").strip()
+        if not link_value:
+            link_value = fallback_link
+        pub_value = ""
+        if pub:
+            pub_value = strip_html((pub.group(1) or pub.group(2) or pub.group(3) or "")).strip()
+        items.append(
+            {
+                "title": t,
+                "source": source_name,
+                "link": link_value,
+                "time": pub_value,
+                "raw": raw,
+            }
+        )
+        if len(items) >= max_items:
+            break
+    return items
+
+
 def collect_top_wechat_gzh() -> List[Dict[str, str]]:
-    text = fetch_first_success(
-        [
-            WECHAT_TOP20_GZH_URL,
-            "https://www.aigcrank.cn/top/202412gzh",
-        ]
-    )
+    text = fetch_first_success(WECHAT_TOP20_GZH_URLS, timeout=20)
     if text.startswith("__ERROR__"):
         return []
     rows = []
+    table_rows = re.findall(
+        r"<tr[^>]*>\s*<td[^>]*class=['\"]column-1['\"][^>]*>(\d+)</td>\s*"
+        r"<td[^>]*class=['\"]column-2['\"][^>]*>(.*?)</td>\s*"
+        r"<td[^>]*class=['\"]column-3['\"][^>]*>(.*?)</td>\s*"
+        r"<td[^>]*class=['\"]column-4['\"][^>]*>(.*?)</td>\s*"
+        r"<td[^>]*class=['\"]column-5['\"][^>]*>(.*?)</td>\s*"
+        r"<td[^>]*class=['\"]column-6['\"][^>]*>(.*?)</td>\s*"
+        r"<td[^>]*class=['\"]column-7['\"][^>]*>(.*?)</td>\s*"
+        r"<td[^>]*class=['\"]column-8['\"][^>]*>(.*?)</td>\s*"
+        r"<td[^>]*class=['\"]column-9['\"][^>]*>(.*?)</td>",
+        text,
+        flags=re.S | re.I,
+    )
+    for rank, name, wx_id, article_count, publish_count, total_reads, avg_reads, likes, score in table_rows:
+        rank = strip_html(rank)
+        name = strip_html(name)
+        wx_id = strip_html(wx_id)
+        score = strip_html(score)
+        avg_reads = strip_html(avg_reads)
+        if not rank.isdigit() or int(rank) > 20 or not name or not wx_id:
+            continue
+        rows.append(
+            {
+                "title": f"{rank}）{name}",
+                "source": "AIGCRank 微信 AI 公告号榜",
+                "link": WECHAT_TOP20_GZH_URL,
+                "raw": f"微信号：{wx_id}｜新榜指数：{score}｜平均阅读数：{avg_reads}",
+                "rank": int(rank),
+                "accountName": name,
+                "accountId": wx_id,
+                "score": score,
+                "avgReads": avg_reads,
+                "articleCount": strip_html(article_count),
+                "publishCount": strip_html(publish_count),
+                "totalReads": strip_html(total_reads),
+                "likes": strip_html(likes),
+            }
+        )
+    if rows:
+        return rows[:20]
     pattern_table = re.compile(r"^\s*([1-9]\d?|20)\s+([^\s|]{2,80})\s+([A-Za-z0-9_\-]{2,60})\s+(\d[\d\.]*)", re.M)
     for m in pattern_table.finditer(text):
         rank = m.group(1).strip()
@@ -1272,6 +1930,10 @@ def collect_top_wechat_gzh() -> List[Dict[str, str]]:
                     "source": "AIGCRank 微信 AI 公告号榜",
                     "link": WECHAT_TOP20_GZH_URL,
                     "raw": f"微信号：{wx_id}｜热度分：{score}",
+                    "rank": int(rank),
+                    "accountName": name,
+                    "accountId": wx_id,
+                    "score": score,
                 }
             )
         if len(rows) >= 20:
@@ -1309,6 +1971,9 @@ def collect_top_wechat_gzh() -> List[Dict[str, str]]:
                     "source": "AIGCRank 微信 AI 公告号榜",
                     "link": WECHAT_TOP20_GZH_URL,
                     "raw": "解析来源：页面文本",
+                    "rank": idx,
+                    "accountName": wx,
+                    "accountId": wx,
                 }
             )
     return rows
@@ -1317,15 +1982,22 @@ def collect_top_wechat_gzh() -> List[Dict[str, str]]:
 def _collect_twitter_rss(handle: str) -> List[Dict[str, str]]:
     source = f"Twitter/{handle}"
     for instance in TWITTER_RSS_INSTANCES:
+        if instance in FAILED_TWITTER_RSS_INSTANCES:
+            continue
         if "nitter" in instance:
             url = f"{instance}/{handle.lower()}/rss"
         else:
             url = f"{instance}/twitter/user/{handle}"
-        items = parse_rss_feed_signals_custom(
-            url=url,
+        text = fetch_url(url)
+        if text.startswith("__ERROR__"):
+            FAILED_TWITTER_RSS_INSTANCES.add(instance)
+            continue
+        items = _parse_rss_feed_items(
+            text=text,
             source_name=source,
             keyword_filter=["ai", "agent", "llm", "gpt", "model", "automation", "assistant"],
             max_items=8,
+            fallback_link=url,
         )
         if items:
             return items
@@ -1334,57 +2006,122 @@ def _collect_twitter_rss(handle: str) -> List[Dict[str, str]]:
 
 def collect_twitter_ai_updates() -> List[Dict[str, object]]:
     out: List[Dict[str, object]] = []
+    seen: set[str] = set()
     for company in TWITTER_TECH_ACCOUNTS:
         handle = company["handle"]
         posts = _collect_twitter_rss(handle)
-        for post in posts[:4]:
+        for post in posts[:2]:
             item = dict(post)
             item["source"] = f"Twitter/{company['name']}（{handle}）"
+            item["account"] = company["name"]
+            item["handle"] = handle
+            key = f"{item.get('title', '')}|{item.get('link', '')}"
+            if key in seen:
+                continue
+            seen.add(key)
             out.append(item)
     return out
 
 
 def collect_broker_ai_reports() -> List[Dict[str, object]]:
     out: List[Dict[str, object]] = []
+    seen: set[str] = set()
+    canonical_names = {broker["name"]: broker["name"] for broker in BROKER_REPORT_SOURCES}
+    for query in BROKER_REPORT_SEARCH_QUERIES:
+        query_encoded = quote(query)
+        for template in BROKER_REPORT_SEARCH_TEMPLATES:
+            text = fetch_url(template.format(query=query_encoded), timeout=18)
+            if text.startswith("__ERROR__"):
+                continue
+            for item in _parse_sina_broker_report_rows(text, canonical_names):
+                title_key = str(item.get("title", "")).strip()
+                if not title_key or title_key in seen:
+                    continue
+                seen.add(title_key)
+                out.append(item)
+                if len(out) >= 18:
+                    return out[:18]
     for broker in BROKER_REPORT_SOURCES:
         name = broker["name"]
         org = quote(name)
         for template in BROKER_REPORT_TEMPLATES:
             url = template.format(org=org)
-            text = fetch_url(url)
+            text = fetch_url(url, timeout=18)
             if text.startswith("__ERROR__"):
                 continue
-            seen = set()
-            for link, title in re.findall(
-                r"<a[^>]*href=[\"']([^\"']*vReport_Show[^\"']*)[\"'][^>]*>([^<]{3,140})</a>",
-                text,
-                flags=re.S | re.I,
-            ):
-                if not title:
+            for item in _parse_sina_broker_report_rows(text, canonical_names, fallback_broker=name):
+                title_key = str(item.get("title", "")).strip()
+                if not title_key or title_key in seen:
                     continue
-                t = strip_html(title)
-                if not any(k.lower() in t.lower() for k in BROKER_AI_KEYWORDS):
-                    continue
-                if t in seen:
-                    continue
-                seen.add(t)
-                out.append(
-                    {
-                        "title": t,
-                        "source": f"{name} 研报",
-                        "link": (link if link.startswith("http") else f"https://stock.finance.sina.com.cn{link}"),
-                        "time": "",
-                        "raw": "来自券商研究报告检索（sina）",
-                        "broker": name,
-                    }
-                )
-                if len(out) >= 12:
+                seen.add(title_key)
+                out.append(item)
+                if len(out) >= 18:
                     break
-            if out and len(out) >= 12:
+            if len(out) >= 18:
                 break
-        if len(out) >= 12:
+        if len(out) >= 18:
             break
-    return out
+    return out[:18]
+
+
+def _normalize_broker_name(name: str) -> str:
+    normalized = strip_html(name)
+    normalized = normalized.replace("股份有限公司", "").replace("有限责任公司", "").replace("有限公司", "")
+    normalized = normalized.replace("证券股份", "证券").replace("证券有限", "证券")
+    return re.sub(r"\s+", "", normalized)
+
+
+def _make_absolute_sina_link(link: str) -> str:
+    href = (link or "").strip()
+    if href.startswith("https://") or href.startswith("http://"):
+        return href
+    if href.startswith("//"):
+        return "https:" + href
+    return f"https://stock.finance.sina.com.cn{href}"
+
+
+def _parse_sina_broker_report_rows(
+    text: str,
+    canonical_names: Dict[str, str],
+    fallback_broker: str = "",
+) -> List[Dict[str, object]]:
+    rows: List[Dict[str, object]] = []
+    broker_lookup = {_normalize_broker_name(k): v for k, v in canonical_names.items()}
+    pattern = re.compile(
+        r"<tr>\s*<td>\d+</td>\s*"
+        r"<td[^>]*class=['\"]tal f14['\"][^>]*>.*?<a[^>]*title=['\"]([^'\"]+)['\"]\s+href=['\"]([^'\"]+)['\"][^>]*>.*?</td>\s*"
+        r"<td>(.*?)</td>\s*"
+        r"<td>(\d{4}-\d{2}-\d{2})</td>\s*"
+        r"<td>(.*?)</td>\s*"
+        r"<td>(.*?)</td>\s*</tr>",
+        flags=re.S | re.I,
+    )
+    for title, link, category, report_date, broker_html, analyst_html in pattern.findall(text):
+        clean_title = strip_html(title)
+        if not clean_title or not any(k.lower() in clean_title.lower() for k in BROKER_AI_KEYWORDS):
+            continue
+        broker_name = strip_html(broker_html)
+        analyst = strip_html(analyst_html)
+        normalized = _normalize_broker_name(broker_name or fallback_broker)
+        canonical = broker_lookup.get(normalized)
+        if not canonical and fallback_broker:
+            canonical = fallback_broker
+        if not canonical:
+            continue
+        rows.append(
+            {
+                "title": clean_title,
+                "source": f"{canonical} 研报",
+                "link": _make_absolute_sina_link(link),
+                "time": report_date,
+                "raw": "来自券商研究报告检索（sina）",
+                "broker": canonical,
+                "category": strip_html(category),
+                "analyst": analyst,
+                "institution": broker_name or canonical,
+            }
+        )
+    return rows
 
 
 def collect_frontier_signals() -> List[Dict[str, str]]:
@@ -1437,6 +2174,37 @@ def parse_agui_and_gh_stars() -> Dict[str, str]:
 
 
 def parse_github_trending_weekly() -> List[Dict[str, str]]:
+    projects_by_repo: Dict[str, Dict[str, object]] = {}
+
+    def _append_project(repo: str, source: str, total_i: int, inc_i: int, description: str = "") -> None:
+        if not repo:
+            return
+        if inc_i <= 0:
+            return
+        if total_i < GITHUB_TREND_MIN_STARS and inc_i < GITHUB_TREND_MIN_DELTA:
+            return
+        if inc_i < GITHUB_TREND_MIN_DELTA and inc_i * 100 < total_i * GITHUB_TREND_MIN_DELTA_PERCENT:
+            return
+        existing = projects_by_repo.get(repo)
+        candidate = {
+            "repo": repo,
+            "link": github_repo_link(repo),
+            "source": source,
+            "currentStars": total_i,
+            "delta7d": inc_i,
+            "rule": f"星标>= {GITHUB_TREND_MIN_STARS} 或 增量>= {GITHUB_TREND_MIN_DELTA} 或 增速>= {GITHUB_TREND_MIN_DELTA_PERCENT}%",
+            "highlights": "近7天增量满足阈值，持续观察变化。",
+            "description": str(description or "").strip(),
+        }
+        candidate["shortDescription"] = _github_short_description(candidate)
+        if not existing:
+            projects_by_repo[repo] = candidate
+            return
+        old_delta = int(existing.get("delta7d", 0))
+        old_stars = int(existing.get("currentStars", 0))
+        if inc_i > old_delta or (inc_i == old_delta and total_i > old_stars):
+            projects_by_repo[repo] = candidate
+
     for source_url in (SOURCE_URLS["github_trend_json_weekly"], SOURCE_URLS["github_trend_json_daily"]):
         text = fetch_url(source_url)
         if text.startswith("__ERROR__"):
@@ -1445,63 +2213,62 @@ def parse_github_trending_weekly() -> List[Dict[str, str]]:
             payload = json.loads(text)
         except Exception:
             continue
-        items = payload.get("repositories") if isinstance(payload, dict) else payload
+        if isinstance(payload, dict):
+            items = payload.get("repositories") or payload.get("items") or []
+        else:
+            items = payload
         if not isinstance(items, list):
             continue
-        projects = []
         for it in items[:200]:
-            repo = (it.get("owner") + "/" + it.get("repo")) if isinstance(it, dict) else ""
-            total = str(it.get("stars", "0")) if isinstance(it, dict) else "0"
-            inc = str(it.get("trend", "0")) if isinstance(it, dict) else "0"
+            if not isinstance(it, dict):
+                continue
+            repo = ""
+            if it.get("owner") and it.get("repo"):
+                repo = str(it.get("owner")) + "/" + str(it.get("repo"))
+            elif it.get("title"):
+                repo = str(it.get("title"))
+            elif it.get("url"):
+                repo = str(it.get("url")).replace("https://github.com/", "").strip("/")
+            total = str(it.get("stars", "0"))
+            inc = str(it.get("trend", it.get("addStars", "0")))
             total_i = int(str(total).replace(",", "").strip() or 0)
             inc_i = int(str(inc).replace(",", "").strip() or 0)
-            if repo and total_i >= 10000 and inc_i >= 2000:
-                projects.append(
-                    {
-                        "repo": repo,
-                        "link": github_repo_link(repo),
-                        "source": "GitHub Trending API",
-                        "currentStars": total_i,
-                        "delta7d": inc_i,
-                        "highlights": "近7天增量满足阈值，持续观察变化。",
-                    }
-                )
-            if len(projects) >= 12:
-                break
-        if projects:
-            return projects
+            desc = str(
+                it.get("description")
+                or it.get("desc")
+                or it.get("summary")
+                or it.get("language")
+                or ""
+            )
+            _append_project(repo, "GitHub Trending API", total_i, inc_i, desc)
 
     text = fetch_url(SOURCE_URLS["github_trend_weekly"])
-    if text.startswith("__ERROR__"):
-        return []
-    projects = []
-    for item in re.finditer(
-        r'github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+).*?(\d{1,3}(?:,\d{3})*)\s*stars?\s*.*?(\d{1,3}(?:,\d{3})*)\s*increase',
-        text,
-        re.S | re.I,
-    ):
-        repo = item.group(1)
-        total = item.group(2).replace(",", "")
-        inc = item.group(3).replace(",", "")
-        if repo and total.isdigit() and inc.isdigit():
-            total_i = int(total)
-            inc_i = int(inc)
-            if total_i >= 10000 and inc_i >= 2000:
-                projects.append(
-                    {
-                        "repo": repo,
-                        "link": github_repo_link(repo),
-                        "source": "GitHub Trending",
-                        "currentStars": total_i,
-                        "delta7d": inc_i,
-                        "highlights": "近7天增量满足阈值，持续观察变化。",
-                    }
-                )
-        if len(projects) >= 12:
-            break
-    if projects:
-        return projects
-    return []
+    if not text.startswith("__ERROR__"):
+        for item in re.finditer(
+            r"<p><a href=['\"]https://github\.com/([A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+)['\"][^>]*>.*?</a>.*?"
+            r"<span>⭐\s*([\d,]+)</span>.*?"
+            r"<div class=['\"]stars-today['\"]>⭐\s*([\d,]+)\s*stars this week</div>",
+            text,
+            re.S | re.I,
+        ):
+            repo = item.group(1)
+            total = item.group(2).replace(",", "")
+            inc = item.group(3).replace(",", "")
+            if repo and total.isdigit() and inc.isdigit():
+                _append_project(repo, "GitHub Trending", int(total), int(inc))
+
+    sorted_projects = sorted(
+        projects_by_repo.values(),
+        key=lambda item: (
+            int(item.get("delta7d", 0)) * 10000 // max(int(item.get("currentStars", 0)), 1),
+            int(item.get("delta7d", 0)),
+            int(item.get("currentStars", 0)),
+        ),
+        reverse=True,
+    )
+    for idx, item in enumerate(sorted_projects, start=1):
+        item["rank"] = idx
+    return sorted_projects[:GITHUB_TREND_RETURN_LIMIT]
 
 
 def _project_tokens(repo: str, extra: str = "") -> List[str]:
@@ -1672,23 +2439,120 @@ def summarize_focus_domains(signals: List[Dict[str, str]]) -> List[Dict[str, obj
             text = f"{item['title']} {item['source']} {item['snippet']}".lower()
             if any(k in text for k in keys):
                 picked.append(item)
+        picked = picked[:4]
         if not picked:
-            picked = [
-                {
-                    "title": "暂无明确新增信号",
-                    "source": "本地汇总",
-                    "link": "",
-                    "time": "",
-                    "snippet": "建议补齐对应渠道（AG-UI、向量检索、图谱、生成式模型）周度跟踪。",
-                }
-            ]
+            continue
         out.append(
             {
                 "field": conf["title"],
-                "items": picked[:4],
+                "items": picked,
             }
         )
     return out
+
+
+def _safe_int(value: object, default: int = 0) -> int:
+    try:
+        if isinstance(value, bool):
+            return 1 if value else 0
+        return int(value)
+    except Exception:
+        try:
+            return int(str(value).replace(",", "").strip())
+        except Exception:
+            return default
+
+
+def _fetch_github_readme_text(repo: str) -> str:
+    candidate_paths = ["README.md", "readme.md", "README.rst", "readme.rst"]
+    branches = ["main", "master", "develop", "dev"]
+    repo = (repo or "").strip()
+    for branch in branches:
+        for path in candidate_paths:
+            text = fetch_url(f"https://raw.githubusercontent.com/{repo}/{branch}/{path}")
+            if text.startswith("__ERROR__"):
+                continue
+            if text and len(text) > 180:
+                return text
+    return ""
+
+
+def _infer_solution_from_text(repo: str, description: str, source_text: str, mode: str = "problem") -> str:
+    repo_clean = (repo or "").replace("-", " ").replace("_", " ").strip()
+    if mode == "solution":
+        if source_text:
+            return f"{repo_clean} 的开源实现更偏向以可运行流程为核心：先对接外部能力，再通过输入、编排、工具与输出层形成闭环，解决任务执行可靠性和复用性问题。"
+        if description:
+            return f"{repo_clean} 在公开说明中强调 {description[:120]}，建议以可验证任务流和最小权限工具集合支撑落地。"
+    if description:
+        return f"项目围绕 {repo_clean} 聚焦 {description[:140]}，尝试解决 AI 智能体与工具协作中的关键问题。"
+    if source_text:
+        return source_text[:160] or "基于仓库公开说明，该项目聚焦提升 AI 应用可交付性与协同效率。"
+    return f"{repo_clean} 旨在提升任务执行效率与可观察性。"
+
+
+def _build_architecture_from_text(repo: str, source_text: str, readme_text: str) -> str:
+    nodes = _derive_architecture_nodes(f"{repo} {source_text} {readme_text}")
+    if nodes:
+        return f"可识别到的架构组件：{', '.join(nodes)}，建议以事件总线+编排层+工具层+输出层进行设计闭环。"
+    if "agent" in source_text.lower() or "agent" in readme_text.lower():
+        return "偏向 Agent 驱动架构，核心组件建议采用输入层、任务规划层、工具编排层、执行层与可观测层分层设计。"
+    return "当前公开文本未完整暴露架构细节，建议结合源码入口与配置文件确认边界（入口层、路由层、执行层）。"
+
+
+def build_github_deep_dive_project(
+    trend_projects: List[Dict[str, object]],
+    fallback_candidates: List[Dict[str, object]],
+) -> Dict[str, object] | None:
+    pool: List[Dict[str, object]] = []
+    for item in trend_projects or []:
+        if isinstance(item, dict):
+            pool.append(item)
+    for item in fallback_candidates or []:
+        if isinstance(item, dict):
+            repo_name = str(item.get("repo", "")).strip()
+            if repo_name and not any(str(x.get("repo", "")).strip() == repo_name for x in pool):
+                pool.append(item)
+    if not pool:
+        return None
+
+    ranked = sorted(
+        pool,
+        key=lambda p: (
+            _safe_int(p.get("delta7d", 0)),
+            _safe_int(p.get("currentStars", 0)),
+            -_safe_int(p.get("rank", 10**9)),
+        ),
+        reverse=True,
+    )
+    target = dict(ranked[0])
+    repo = str(target.get("repo", "")).strip()
+    if not repo:
+        return None
+
+    meta = fetch_repo_meta(repo) if repo else target
+    if meta:
+        target.update(meta)
+    readme = _fetch_github_readme_text(repo)
+    if not readme:
+        readme = str(target.get("description", ""))
+    description = str(target.get("description", "")).strip() or str(target.get("highlights", "")).strip()
+    source_text = " ".join(
+        [
+            str(target.get("source", "")),
+            description,
+            str(target.get("raw", "")),
+        ]
+    ).strip()
+    return {
+        "repo": repo,
+        "link": target.get("link", github_repo_link(repo)),
+        "stars": _safe_int(target.get("currentStars", 0)),
+        "delta7d": _safe_int(target.get("delta7d", 0)),
+        "problem": _infer_solution_from_text(repo, description, source_text, mode="problem"),
+        "solution": _infer_solution_from_text(repo, description, readme, mode="solution"),
+        "architecture": _build_architecture_from_text(repo, source_text, readme),
+    }
 
 
 def fallback_github_projects() -> List[Dict[str, object]]:
@@ -1910,13 +2774,47 @@ def _build_email_message(
     title: str,
     output_file: str,
     recipients: List[str],
+    inspection_summary: str | None = None,
 ) -> EmailMessage:
+    if inspection_summary:
+        report_markdown = f"{inspection_summary}\n\n{report_markdown}"
+    def _compact_email_text(raw: str, max_lines: int = 240) -> str:
+        source = (raw or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+        if not source:
+            return "AI 研究日报：本次抓取结果为空或内容重复被过滤，请稍后重试并查看最新日报文件。"
+        lines = [ln.rstrip() for ln in source.split("\n")]
+        compacted: List[str] = []
+        seen: set[str] = set()
+        empty_streak = 0
+        for ln in lines:
+            cleaned = ln.strip()
+            if not cleaned:
+                empty_streak += 1
+                if empty_streak <= 1 and compacted:
+                    compacted.append("")
+                continue
+            empty_streak = 0
+            norm = re.sub(r"\s+", " ", re.sub(r"^\s*[\-\*\+]\s*", "", cleaned)).strip().lower()
+            if not norm:
+                continue
+            if norm in seen:
+                continue
+            seen.add(norm)
+            compacted.append(cleaned)
+            if len(compacted) >= max_lines:
+                break
+        while compacted and compacted[-1] == "":
+            compacted.pop()
+        if not compacted:
+            return "AI 研究日报：本次抓取结果为空或内容重复被过滤，请稍后重试并查看最新日报文件。"
+        return "\n".join(compacted)[:12000]
+
     msg = EmailMessage()
     msg["From"] = EMAIL_FROM or EMAIL_SMTP_USER
     msg["To"] = ", ".join(recipients)
     msg["Subject"] = title
     msg["Date"] = datetime.now().strftime("%a, %d %b %Y %H:%M:%S +0800")
-    body_text = (report_markdown or "AI 研究日报").strip()[:12000]
+    body_text = _compact_email_text(report_markdown or "AI 研究日报")
     msg.set_content(body_text)
     msg.add_alternative(report_html, subtype="html")
     return msg
@@ -2195,7 +3093,115 @@ def _email_config_snapshot() -> Dict[str, object]:
     }
 
 
-def send_report_email(report_markdown: str, report_html: str, title: str, output_file: str) -> Dict[str, object]:
+def _collect_report_watchpoints(report: Dict[str, object]) -> List[str]:
+    date = str(report.get("date", "") or "")
+    watchpoints: List[str] = []
+
+    ai_highlights = report.get("aiHighlights")
+    if not ai_highlights:
+        watchpoints.append(f"{date} | AI快讯为空")
+    else:
+        if any(
+            isinstance(item, dict) and str(item.get("source", "")) == "抓取状态" for item in ai_highlights if isinstance(item, dict)
+        ):
+            watchpoints.append(f"{date} | AI快讯仅返回抓取状态占位")
+
+    def _check_list_field(field: str, label: str) -> None:
+        items = report.get(field)
+        if not isinstance(items, list) or not items:
+            watchpoints.append(f"{date} | {label}为空")
+            return
+        if any(
+            isinstance(item, dict) and "历史复用" in str(item.get("source", ""))
+            for item in items
+        ):
+            watchpoints.append(f"{date} | {label}使用了历史复用")
+
+    for field, label in (
+        ("trendProjects", "GitHub趋势"),
+        ("wechatTop20", "微信Top20"),
+        ("twitterUpdates", "Twitter"),
+        ("brokerReports", "券商研报"),
+    ):
+        _check_list_field(field, label)
+
+    if not watchpoints:
+        watchpoints.append(f"{date} | 无主要告警")
+    return watchpoints
+
+
+def _build_inspection_summary(
+    generated_reports: List[Dict],
+    policy: Dict[str, object],
+    merged: bool,
+    prune: Dict[str, object],
+    archive_summary: Dict[str, object],
+) -> Dict[str, object]:
+    watchpoints: List[str] = []
+    for report in generated_reports:
+        watchpoints.extend(_collect_report_watchpoints(report))
+    warning_count = sum(1 for item in watchpoints if "无主要告警" not in item)
+
+    return {
+        "status": "warn" if warning_count > 0 else "ok",
+        "execution_time": datetime.now().astimezone().isoformat(),
+        "target_backfill_dates": policy.get("backfill_dates", []),
+        "generated_dates": [str(r.get("date", "")) for r in generated_reports],
+        "generated_count": len(generated_reports),
+        "merged": bool(merged),
+        "record_policy": {
+            "retain_last": policy.get("retain_last"),
+            "removed_old": policy.get("removed_old"),
+            "remaining_records": policy.get("remaining_records"),
+            "merged_within_7d": policy.get("merged_within_7d"),
+        },
+        "archive": {
+            "moved": len(archive_summary.get("moved", [])) if isinstance(archive_summary, dict) else 0,
+            "replaced": len(archive_summary.get("replaced", [])) if isinstance(archive_summary, dict) else 0,
+            "deleted": len(archive_summary.get("deleted", [])) if isinstance(archive_summary, dict) else 0,
+            "errors": len(archive_summary.get("errors", [])) if isinstance(archive_summary, dict) else 0,
+        },
+        "prune": {
+            "removed": prune.get("removed"),
+            "remaining": prune.get("remaining"),
+        },
+        "watchpoints": watchpoints,
+        "warning_count": warning_count,
+    }
+
+
+def _format_inspection_text(summary: Dict[str, object]) -> str:
+    backfill_dates = ", ".join(summary.get("target_backfill_dates", []) or [])
+    generated_dates = ", ".join(summary.get("generated_dates", []) or [])
+    policy = summary.get("record_policy", {})
+    archive = summary.get("archive", {})
+    prune = summary.get("prune", {})
+    lines = [
+        "# 巡检摘要",
+        f"- 执行时间：{summary.get('execution_time', '')}",
+        f"- 回补日期：{backfill_dates or '无'}",
+        f"- 生成报告：{summary.get('generated_count', 0)} 份（{generated_dates}）",
+        f"- 合并归档：{'是' if summary.get('merged') else '否'}",
+        f"- 策略：保留{policy.get('retain_last', '')}条，清理{policy.get('removed_old', 0)}条，剩余{policy.get('remaining_records', 0)}条",
+        f"- 归档：移动{archive.get('moved', 0)}条，替换{archive.get('replaced', 0)}条，删除{archive.get('deleted', 0)}条，错误{archive.get('errors', 0)}条",
+        f"- 清理：移除{prune.get('removed', 0)}条，剩余{prune.get('remaining', 0)}条",
+        f"- 告警状态：{'异常' if summary.get('status') == 'warn' else '正常'}",
+        "- 告警明细：",
+    ]
+    for item in summary.get("watchpoints", []) or []:
+        lines.append(f"  - {item}")
+    if not summary.get("watchpoints"):
+        lines.append("  - 无")
+    return "\n".join(lines)
+
+
+def send_report_email(
+    report_markdown: str,
+    report_html: str,
+    title: str,
+    output_file: str,
+    inspection_summary: str | None = None,
+) -> Dict[str, object]:
     if not EMAIL_ENABLED:
         return {"status": "skip", "reason": "DAILY_AI_BRIEF_SEND_EMAIL 未开启", "email_config": _email_config_snapshot()}
     if not EMAIL_RECIPIENT:
@@ -2209,6 +3215,7 @@ def send_report_email(report_markdown: str, report_html: str, title: str, output
         title=title,
         output_file=output_file,
         recipients=recipients,
+        inspection_summary=inspection_summary,
     )
 
     attempted = []
@@ -2316,9 +3323,11 @@ def send_report_email(report_markdown: str, report_html: str, title: str, output
 
     if transport == "smtp":
         if used_smtp:
+            final_reason = f"SMTP 发送失败: {'; '.join(attempted)}; 最后错误：{last_error}"
+            _queue_unsent_email(msg, final_reason)
             return {
                 "status": "error",
-                "reason": f"SMTP 发送失败: {'; '.join(attempted)}; 最后错误：{last_error}",
+                "reason": final_reason,
                 "attempted": attempted,
                 "email_config": _email_config_snapshot(),
             }
@@ -2532,34 +3541,20 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
     if not trend:
         trend = _last_valid_history_items(history, "trendProjects", max_items=12)
         trend = _mark_history_fallback(trend, "历史复用")
-    ai_search_updates = collect_ai_search_updates()
-    if not ai_search_updates:
-        ai_search_updates = _last_valid_history_items(history, "aiHighlights", max_items=6)
-        ai_search_updates = _mark_history_fallback(ai_search_updates, "历史复用")
+    ai_search_updates = collect_ai_search_updates_with_enhancement()
     wechat_top20 = collect_top_wechat_gzh()
     if not wechat_top20:
-        wechat_top20 = _last_valid_history_items(history, "wechatTop20", max_items=20)
-        wechat_top20 = _mark_history_fallback(wechat_top20, "历史复用")
+        wechat_top20 = []
     twitter_updates = collect_twitter_ai_updates()
     if not twitter_updates:
-        twitter_updates = _last_valid_history_items(history, "twitterUpdates", max_items=10)
-        twitter_updates = _mark_history_fallback(twitter_updates, "历史复用")
+        twitter_updates = []
     broker_reports = collect_broker_ai_reports()
     if not broker_reports:
-        broker_reports = _last_valid_history_items(history, "brokerReports", max_items=10)
-        broker_reports = _mark_history_fallback(broker_reports, "历史复用")
+        broker_reports = []
 
     aiHighlights = []
     if not (openai or anthropic or infoq or frontier or ai_search_updates or priority_raw):
-        aiHighlights = [
-            {
-                "title": "主要来源当前未返回可识别的 AI 快讯，请检查抓取链路或后续新增来源。",
-                "source": "抓取状态",
-                "link": "",
-                "time": "",
-                "raw": "本次抓取仅返回状态信息。",
-            }
-        ]
+        aiHighlights = []
         merged_signals = []
     else:
         merged_signals = append_source_link([*openai, *anthropic, *infoq, *frontier, *ai_search_updates, *priority_raw])  # 保留统一结构与链接
@@ -2599,7 +3594,13 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
 
     skill_top = select_top_skills(trend)
     focused = summarize_focus_domains(merged_signals)
-    trend_projects = append_source_link(trend[:6]) if trend else []
+    trend_projects = append_source_link(trend[:GITHUB_TREND_REPORT_LIMIT]) if trend else []
+    deep_dive = build_github_deep_dive_project(
+        trend_projects=trend_projects,
+        fallback_candidates=(skill_top.get("ai_engineering", {}).get("items", [])
+                             + skill_top.get("agent_orchestration", {}).get("items", [])
+                             + skill_top.get("ppt_skill", {}).get("items", [])),
+    )
     topic_summary = summarize_hot_topics(
         {
             "aiHighlights": aiHighlights,
@@ -2649,6 +3650,7 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
         "topicSummary": topic_summary,
         "skillTop": skill_top,
         "focusedSignals": focused,
+        "githubDeepDive": deep_dive,
         "relatedSignals": [],
         "diffSummary": "AG-UI 与代理执行栈仍向任务可恢复、可观测方向收敛；今日新增数据优先关注 AI 协作、Agent 协议与实盘研判。",
         "suggestions": [
@@ -2656,9 +3658,10 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
             "对已触发较高涨星的 agent 工具仓库做一次本地试用评测。",
             "对接微信 Top20 与新浪研报的同主题项，建立“可落地验证”清单。",
             "关注 Twitter 美国大厂 AI 与治理、合规叙事的差异，补充跨行业对标。",
+            "新增重点跟踪 Agent Team、编排产品（含 multi-agent 生态与 multica）与任务编排落地实践。",
         ],
     }
-    return report
+    return _dedupe_report_content(report)
 
 
 def format_markdown(report: Dict) -> str:
@@ -2706,7 +3709,7 @@ def format_markdown(report: Dict) -> str:
             )
         lines.append("")
 
-    lines.extend(["## 定向细分领域追踪（AU- UI / AI地图 / AI搜索 / AI生图）", ""])
+    lines.extend(["## 定向细分领域追踪（AU- UI / AI地图 / AI检索与RAG / AI生图 / Agent Team）", ""])
     for block in report.get("focusedSignals", []):
         lines.append(f"### {block.get('field', '')}")
         for item in block.get("items", [])[:4]:
@@ -2743,15 +3746,16 @@ def format_markdown(report: Dict) -> str:
             f"- 当前星标：{ag.get('stars', 'N/A')}",
             f"- 描述：{ag.get('description', '')}",
             "",
-            "## GitHub 周度项目（星标>=1W，7天增量>=0.2W）",
+            "## GitHub 周度项目（快速上升）",
         ]
     )
     for p in report.get("trendProjects", []):
         repo = p.get("repo", "N/A")
         link = p.get("link", github_repo_link(repo))
         src = p.get("source", "GitHub")
+        short_desc = _github_short_description(p)
         lines.append(
-            f"- [{repo}]({link})（{src}）：总星 `{p.get('currentStars')}`，7天增量 `{p.get('delta7d')}`"
+            f"- [{repo}]({link})（{src}）：{short_desc}；总星 `{p.get('currentStars')}`，7天增量 `{p.get('delta7d')}`"
         )
     lines.append("")
     lines.extend(["## 今日高频主题（自动提取）", ""])
@@ -2861,10 +3865,12 @@ def format_html(report: Dict) -> str:
 
     trend_html = []
     for p in report.get("trendProjects", []):
+        short_desc = _github_short_description(p)
         trend_html.append(
             "<li><strong><a href='"
             f"{escape(p.get('link', github_repo_link(p.get('repo', ''))))}'>"
-            f"{escape(p.get('repo', ''))}</a></strong>（{escape(str(p.get('source', 'GitHub')))}）：总星 "
+            f"{escape(p.get('repo', ''))}</a></strong>（{escape(str(p.get('source', 'GitHub')))}）："
+            f"{escape(short_desc)}；总星 "
             f"<code>{escape(str(p.get('currentStars', '')))}</code>，7 天增量 "
             f"<code>{escape(str(p.get('delta7d', '')))}</code></li>"
         )
@@ -3092,7 +4098,7 @@ def format_html(report: Dict) -> str:
             f"<li>当前星标：{escape(str(ag.get('stars', 'N/A')))}</li>"
             f"<li>描述：{escape(ag.get('description', ''))}</li>"
             "</ul></div>"
-            "<div class='card'><h3>GitHub 周度项目（星标>=1W，7天增量>=0.2W）</h3>"
+            "<div class='card'><h3>GitHub 周度项目（快速上升）</h3>"
             f"<ul>{trend_html_snippet}</ul></div>"
         ]),
         "chat": f"<div class='card'><ul>{''.join(wechat_html)}</ul></div>",
@@ -3266,6 +4272,875 @@ def format_html(report: Dict) -> str:
 </body>
 </html>
 """.strip()
+
+
+def format_markdown(report: Dict) -> str:
+    source_list = report.get("source_channels", [])
+    priority_blocks = report.get("priorityChannelHighlights", [])
+    focused_blocks = report.get("focusedSignals", [])
+    ai_highlights = report.get("aiHighlights", [])
+    trend_projects = report.get("trendProjects", [])
+    skill_blocks = report.get("skillTop", {}) or {}
+    topic_summary = report.get("topicSummary", [])
+    wechat_top20 = report.get("wechatTop20", [])
+    twitter_updates = report.get("twitterUpdates", [])
+    broker_reports = report.get("brokerReports", [])
+    suggestions = report.get("suggestions", [])
+    deep_dive = report.get("githubDeepDive")
+    ag = report.get("ag_ui", {})
+
+    lines = [
+        f"# {report['title']}",
+        f"- 执行时间：{report['date']}（{report['timezone']}）",
+        f"- 数据源：{' / '.join(source_list) if source_list else 'OpenAI / Anthropic / INFOQ / GitHub / AG-UI / 微信 / Twitter / 券商研报'}",
+        "",
+    ]
+
+    if priority_blocks:
+        lines.append("## [优先] Claude / OpenAI Research 近一周官方更新")
+        for block in priority_blocks:
+            lines.append(f"### {block.get('channel', '官方渠道')}")
+            for item in block.get("items", []):
+                title = item.get("title", "")
+                source = item.get("source", "")
+                link = item.get("link", "")
+                time = item.get("time", "")
+                summary = item.get("summary", "")
+                if not title and not source and not link:
+                    continue
+                lines.append(f"- **{title}**（{source}）{(' | ' + time) if time else ''}")
+                if summary:
+                    lines.append(f"  - 摘要：{summary}")
+                if link:
+                    lines.append(f"  - 链接：{link}")
+                lines.append("")
+            lines.append("")
+
+    if skill_blocks:
+        lines.append("## 明细 Star 的 SKILL（Top3）")
+        for key, block in skill_blocks.items():
+            lines.append(f"### {block.get('title', key)}")
+            if block.get("description"):
+                lines.append(f"- 说明：{block.get('description')}")
+            if block.get("status"):
+                lines.append(f"- 状态：{block.get('status')}")
+            for it in block.get("items", [])[:3]:
+                repo = it.get("repo", "N/A")
+                link = it.get("link", github_repo_link(repo))
+                source = it.get("source", "GitHub")
+                lines.append(
+                    f"- [{repo}]({link})｜来源：{source}｜当前星数 `{it.get('currentStars', 0)}`｜7天增量 `{it.get('delta7d', 0)}`｜{it.get('highlights', it.get('why', ''))}"
+                )
+            lines.append("")
+
+    if focused_blocks:
+        lines.extend(["## 定向细分领域追踪（AU- UI / AI地图 / AI检索与RAG / AI生图 / Agent Team）", ""])
+        for block in focused_blocks:
+            lines.append(f"### {block.get('field', '')}")
+            for item in block.get("items", [])[:4]:
+                title = item.get("title", "")
+                source = item.get("source", "")
+                link = item.get("link", "")
+                time = item.get("time", "")
+                snippet = item.get("snippet", "")
+                if not title:
+                    continue
+                lines.append(f"- **{title}**（{source}）{('，' + time) if time else ''}")
+                if snippet:
+                    lines.append(f"  - {snippet}")
+                if link:
+                    lines.append(f"  - 链接：{link}")
+            lines.append("")
+
+    if ai_highlights:
+        lines.extend(["## AI 信息", "", ""])
+        for item in ai_highlights:
+            title = item.get("title", "")
+            if not title:
+                continue
+            lines.extend(
+                [
+                    f"### {title}",
+                    f"- 来源：{item.get('source', '')}",
+                    f"- 时间：{item.get('time', '')}",
+                    f"- 链接：{item.get('link', '')}",
+                    f"- 核心：{item.get('coreIdea', '')}",
+                    "",
+                ]
+            )
+
+    if ag:
+        lines.extend(["## AG-UI", f"- 仓库：[{ag.get('repo', '')}]({ag.get('link', github_repo_link('ag-ui-protocol/ag-ui'))})"])
+        if ag.get("stars") not in (None, ""):
+            lines.append(f"- 当前星标：{ag.get('stars', 'N/A')}")
+        if ag.get("description"):
+            lines.append(f"- 描述：{ag.get('description', '')}")
+        lines.append("")
+
+    if trend_projects:
+        lines.extend(["## GitHub 周度项目（快速上升）", ""])
+        for p in trend_projects:
+            repo = p.get("repo", "N/A")
+            link = p.get("link", github_repo_link(repo))
+            src = p.get("source", "GitHub")
+            short_desc = _github_short_description(p)
+            lines.append(
+                f"- [{repo}]({link})（{src}）：{short_desc}；总星 `{p.get('currentStars')}`，7天增量 `{p.get('delta7d')}`"
+            )
+        lines.append("")
+        trend_table = _render_markdown_table(
+            ["排名", "仓库", "概括描述", "总星", "7天增量", "来源", "规则"],
+            [
+                [
+                    p.get("rank", idx),
+                    f"[{p.get('repo', 'N/A')}]({p.get('link', github_repo_link(p.get('repo', '')) )})",
+                    _github_short_description(p),
+                    p.get("currentStars", ""),
+                    p.get("delta7d", ""),
+                    p.get("source", "GitHub"),
+                    p.get("rule", "星标与增速策略已适配"),
+                ]
+                for idx, p in enumerate(trend_projects, start=1)
+            ],
+        )
+        if trend_table:
+            lines.append("### GitHub 趋势表")
+            lines.extend(trend_table)
+            lines.append("")
+
+    if topic_summary:
+        lines.extend(["## 今日高频主题（自动提取）", ""])
+        for item in topic_summary:
+            term = item.get("term", "")
+            if term:
+                lines.append(f"- {term}（{item.get('count', 0)}）")
+        lines.append("")
+
+    if wechat_top20:
+        lines.extend(["## WeChat Top20 AI 公告号", ""])
+        for item in wechat_top20:
+            title = item.get("title", "")
+            if not title:
+                continue
+            lines.append(f"- {title}（{item.get('raw', '')}）")
+            if item.get("link"):
+                lines.append(f"  - 参考：{item.get('link')}")
+        wechat_table = _render_markdown_table(
+            ["排名", "公众号", "ID", "新榜指数", "平均阅读数", "链接"],
+            [
+                [
+                    item.get("rank", idx),
+                    item.get("accountName", item.get("title", "")),
+                    item.get("accountId", ""),
+                    item.get("score", ""),
+                    item.get("avgReads", ""),
+                    item.get("link", ""),
+                ]
+                for idx, item in enumerate(wechat_top20[:20], start=1)
+            ],
+        )
+        if wechat_table:
+            lines.append("")
+            lines.append("### WeChat Top20 表")
+            lines.extend(wechat_table)
+
+    if twitter_updates:
+        lines.extend(["", "## Twitter 美国科技公司 AI 动态", ""])
+        for item in twitter_updates:
+            title = item.get("title", "")
+            if not title:
+                continue
+            lines.append(f"- {item.get('source', 'Twitter')}：{title}")
+        twitter_table = _render_markdown_table(
+            ["账号", "标题", "时间", "链接"],
+            [
+                [
+                    item.get("source", "Twitter"),
+                    item.get("title", ""),
+                    item.get("time", ""),
+                    item.get("link", ""),
+                ]
+                for item in twitter_updates[:12]
+            ],
+        )
+        if twitter_table:
+            lines.append("")
+            lines.append("### Twitter 动态表")
+            lines.extend(twitter_table)
+
+    if broker_reports:
+        lines.extend(["", "## 券商 AI 研报（10 大）", ""])
+        by_broker = {}
+        for item in broker_reports:
+            by_broker.setdefault(item.get("broker", "未知券商"), []).append(item)
+        for broker, items in by_broker.items():
+            lines.append(f"### {broker}")
+            for item in items[:3]:
+                title = item.get("title", "")
+                if not title:
+                    continue
+                lines.append(f"- {title}")
+                if item.get("link"):
+                    lines.append(f"  - 链接：{item.get('link')}")
+        broker_table = _render_markdown_table(
+            ["券商", "日期", "分类", "标题", "分析师"],
+            [
+                [
+                    item.get("broker", ""),
+                    item.get("time", ""),
+                    item.get("category", ""),
+                    item.get("title", ""),
+                    item.get("analyst", ""),
+                ]
+                for item in broker_reports[:12]
+            ],
+        )
+        if broker_table:
+            lines.append("")
+            lines.append("### 券商研报表")
+            lines.extend(broker_table)
+
+    if isinstance(deep_dive, dict) and deep_dive.get("repo"):
+        lines.extend(["", "## GitHub 高增长项目深度解读", ""])
+        lines.append(
+            f"- 仓库：[{deep_dive.get('repo', '')}]({deep_dive.get('link', github_repo_link(deep_dive.get('repo', '')) )})"
+        )
+        lines.append(f"- 关注指标：⭐ {deep_dive.get('stars', 0)} / 7天增量 {deep_dive.get('delta7d', 0)}")
+        if deep_dive.get("problem"):
+            lines.append(f"- 解决问题：{deep_dive.get('problem')}")
+        if deep_dive.get("solution"):
+            lines.append(f"- 解决思路：{deep_dive.get('solution')}")
+        if deep_dive.get("architecture"):
+            lines.append(f"- 架构设计：{deep_dive.get('architecture')}")
+
+    record_policy = report.get("record_policy")
+    if isinstance(record_policy, dict):
+        lines.append("")
+        lines.append("## 合并与差异")
+        lines.append(f"- 今日差异：{report.get('diffSummary', '')}")
+        lines.append(
+            "- 保留策略：最近{retain}条；清理旧记录 {removed_old} 条；当前保留 {remaining_records} 条；7天关联窗口 {merged_within_7d} 天；今日是否合并：{merged}。".format(
+                retain=record_policy.get("retain_last", MAX_RECORDS),
+                removed_old=record_policy.get("removed_old", 0),
+                remaining_records=record_policy.get("remaining_records", ""),
+                merged_within_7d=record_policy.get("merged_within_7d", RELATED_WINDOW_DAYS),
+                merged="是" if record_policy.get("merged", False) else "否",
+            )
+        )
+    else:
+        lines.extend([
+            "",
+            "## 合并与差异",
+            f"- 今日差异：{report.get('diffSummary', '')}",
+            "",
+            str(record_policy or "保留策略：最近14条，自动清理旧记录。"),
+        ])
+
+    if suggestions:
+        lines.extend(["", "## 执行建议", ""])
+        for suggestion in suggestions:
+            lines.append(f"- {suggestion}")
+
+    lines.append("")
+    return "\n".join(lines)
+
+
+def format_html(report: Dict) -> str:
+    policy = report.get("record_policy")
+    source_list = report.get("source_channels", [])
+    source_html = " / ".join(source_list) or "OpenAI / Anthropic / INFOQ / GitHub / AG-UI / 微信 / Twitter / 券商研报"
+    priority_blocks = report.get("priorityChannelHighlights", [])
+    ai_highlights = report.get("aiHighlights", [])
+    skill_blocks = report.get("skillTop", {}) or {}
+    trend_projects = report.get("trendProjects", [])
+    wechat_top20 = report.get("wechatTop20", [])
+    twitter_updates = report.get("twitterUpdates", [])
+    broker_reports = report.get("brokerReports", [])
+    topic_summary = report.get("topicSummary", [])
+    focused_blocks = report.get("focusedSignals", [])
+    suggestions = report.get("suggestions", [])
+    deep_dive = report.get("githubDeepDive")
+    ag = report.get("ag_ui", {})
+
+    def _shorten(text: str, limit: int = 95) -> str:
+        txt = re.sub(r"\s+", " ", str(text).strip())
+        if not txt:
+            return ""
+        return txt if len(txt) <= limit else txt[: limit - 3].rstrip() + "..."
+
+    def _extract_highlights(text: str) -> List[str]:
+        if not text:
+            return []
+        low = text.lower()
+        clues = [
+            "agent",
+            "tool",
+            "mcp",
+            "orchestration",
+            "workflow",
+            "api",
+            "architecture",
+            "模型",
+            "推理",
+            "memory",
+            "retrieval",
+            "工具",
+            "多模态",
+            "调度",
+            "routing",
+            "编排",
+            "评估",
+            "fine-tune",
+            "微调",
+            "rag",
+            "reasoning",
+            "agentic",
+            "multi-agent",
+        ]
+        out = []
+        for c in clues:
+            if c in low and c not in out:
+                out.append(c)
+        return out[:4]
+
+    architecture_trace_order = [
+        ("Agent", ("agent", "agents", "agentic", "智能体", "assistant", "代理")),
+        ("Workflow", ("workflow", "work flow", "orchestration", "编排", "任务流", "工作流")),
+        ("RAG", ("rag", "retrieval", "检索", "检索增强", "检索增强生成")),
+        ("Memory", ("memory", "memory store", "记忆", "会话记忆", "记忆库")),
+        ("Router", ("router", "routing", "路由", "分发")),
+        ("Tools", ("tool", "tools", "tooling", "工具", "function", "tool calling")),
+        ("MCP", ("mcp",)),
+        ("API", ("api", "gateway", "接口", "endpoint")),
+        ("Vector DB", ("vector", "向量", "向量库")),
+        ("Policy", ("policy", "guardrail", "guardrails", "安全", "合规")),
+    ]
+
+    def _confidence_label(score: int) -> str:
+        if score >= 4:
+            return "高"
+        if score >= 2:
+            return "中"
+        if score >= 1:
+            return "低"
+        return "低"
+
+    def _build_architecture_signal_map(items: List[Dict[str, object]]) -> List[tuple[str, int]]:
+        scores = {label: 0 for label, _ in architecture_trace_order}
+        for item in items:
+            title = str(item.get("title", ""))
+            summary = str(item.get("summary", ""))
+            sections = item.get("architecture_sections")
+            section_text = " ".join([str(x) for x in sections]) if isinstance(sections, list) else ""
+            nodes = item.get("architecture_nodes", [])
+            node_text = " ".join([str(x) for x in nodes]) if isinstance(nodes, list) else ""
+            source_text = f"{title} {summary} {section_text} {node_text}".lower()
+            for label, keys in architecture_trace_order:
+                key_score = 0
+                for key in keys:
+                    if key in source_text:
+                        key_score += 1
+                if key_score:
+                    title_low = title.lower()
+                    if any(k in title_low for k in keys):
+                        key_score += 1
+                    if isinstance(sections, list) and any(key in section_text.lower() for key in keys):
+                        key_score += 1
+                    if isinstance(nodes, list) and any(key in node_text.lower() for key in keys):
+                        key_score += 1
+                    scores[label] += key_score
+        ordered = [(label, scores[label]) for label, _ in architecture_trace_order if scores.get(label, 0) > 0]
+        return ordered
+
+    tech_overview_blocks = []
+    merged_priority_items: List[Dict[str, object]] = []
+    for block in priority_blocks:
+        items = block.get("items", [])
+        if isinstance(items, list):
+            merged_priority_items.extend([i for i in items if isinstance(i, dict)])
+
+    if merged_priority_items:
+        summary_points: List[str] = []
+        signal_points = _build_architecture_signal_map(merged_priority_items)
+        architecture_trace_points = [
+            f"{label}（置信度：{_confidence_label(score)}）"
+            for label, score in signal_points
+            if label and score > 0
+        ]
+        summary_points.extend(architecture_trace_points)
+
+        for item in merged_priority_items:
+            title = str(item.get("title", "")).strip()
+            summary = str(item.get("summary", "")).strip()
+            text = f"{title} {summary}"
+            for clue in _extract_highlights(text):
+                if clue not in summary_points:
+                    summary_points.append(clue)
+
+        deduped_points: List[str] = []
+        for point in summary_points:
+            if point and point not in deduped_points:
+                deduped_points.append(point)
+        summary_points = deduped_points[:12]
+
+        tech_points = "".join(
+            [f"<li>{escape(_shorten(point))}</li>" for point in summary_points]
+            if summary_points
+            else ["<li>当前区间未提取到可判定的关键技术点。</li>"]
+        )
+        tech_overview_blocks.append(
+            "<section class='card tech-card'>"
+            "<h3>Claude + OpenAI 技术概要</h3>"
+            "<div class='card-inner'>"
+            "<p>技术要点（按置信度与架构线索优先）</p>"
+            f"<ul>{tech_points}</ul>"
+            "</div>"
+            "</section>"
+        )
+
+    priority_html = []
+    for block in priority_blocks:
+        channel = escape(block.get("channel", "官方渠道"))
+        block_body = []
+        for item in block.get("items", []):
+            title = escape(item.get("title", ""))
+            source = escape(item.get("source", ""))
+            time = escape(str(item.get("time", "")))
+            summary = escape(str(item.get("summary", "")))
+            link = escape(str(item.get("link", "")))
+            if not title and not source and not link:
+                continue
+            item_html = f"<li><strong>{title}</strong>（{source}{(' | ' + time) if time else ''})"
+            if summary:
+                item_html += f"<br/>摘要：{summary}"
+            if link:
+                item_html += f"<br/><a href='{link}'>{link}</a>"
+            item_html += "</li>"
+            block_body.append(item_html)
+        if block_body:
+            priority_html.append(f"<h3>{channel}</h3><ul>{''.join(block_body)}</ul>")
+
+    ai_html = []
+    for item in ai_highlights:
+        title = escape(item.get("title", ""))
+        if not title:
+            continue
+        ai_html.append(
+            "<section class='card'>"
+            f"<h3>{title}</h3>"
+            "<ul>"
+            f"<li>来源：{escape(item.get('source', ''))}</li>"
+            f"<li>时间：{escape(str(item.get('time', '')))}</li>"
+            f"<li>链接：<a href='{escape(item.get('link', ''))}'>{escape(item.get('link', ''))}</a></li>"
+            f"<li>核心：{escape(item.get('coreIdea', ''))}</li>"
+            "</ul>"
+            "</section>"
+        )
+
+    trend_list = []
+    for p in trend_projects:
+        short_desc = _github_short_description(p)
+        trend_list.append(
+            "<li><strong><a href='"
+            f"{escape(p.get('link', github_repo_link(p.get('repo', ''))))}'>"
+            f"{escape(p.get('repo', ''))}</a></strong>（{escape(str(p.get('source', 'GitHub')))}）："
+            f"{escape(short_desc)}；总星 "
+            f"<code>{escape(str(p.get('currentStars', '')))}</code>，7 天增量 "
+            f"<code>{escape(str(p.get('delta7d', '')))}</code></li>"
+        )
+    trend_table_html = _render_html_table(
+        ["排名", "仓库", "概括描述", "总星", "7天增量", "来源", "规则"],
+        [
+            [
+                escape(str(p.get("rank", idx))),
+                f"<a href='{escape(p.get('link', github_repo_link(p.get('repo', ''))))}'>{escape(p.get('repo', ''))}</a>",
+                escape(_github_short_description(p)),
+                escape(str(p.get("currentStars", ""))),
+                escape(str(p.get("delta7d", ""))),
+                escape(str(p.get("source", "GitHub"))),
+                escape(str(p.get("rule", "星标与增速策略已适配"))),
+            ]
+            for idx, p in enumerate(trend_projects, start=1)
+        ],
+    )
+
+    wechat_html = []
+    if wechat_top20:
+        for item in wechat_top20:
+            title = escape(item.get("title", ""))
+            raw = escape(item.get("raw", ""))
+            if title:
+                wechat_html.append(f"<li>{title} - {raw}</li>")
+    wechat_table_html = _render_html_table(
+        ["排名", "公众号", "ID", "新榜指数", "平均阅读数", "链接"],
+        [
+            [
+                escape(str(item.get("rank", idx))),
+                escape(str(item.get("accountName", item.get("title", "")))),
+                escape(str(item.get("accountId", ""))),
+                escape(str(item.get("score", ""))),
+                escape(str(item.get("avgReads", ""))),
+                f"<a href='{escape(str(item.get('link', '')))}'>{escape(str(item.get('link', '')))}</a>" if item.get("link") else "",
+            ]
+            for idx, item in enumerate(wechat_top20[:20], start=1)
+        ],
+    )
+
+    twitter_html = []
+    if twitter_updates:
+        for item in twitter_updates:
+            twitter_html.append(
+                f"<li>{escape(item.get('source', 'Twitter'))}：{escape(item.get('title', ''))}<br/>{escape(item.get('link', ''))}</li>"
+            )
+    twitter_table_html = _render_html_table(
+        ["账号", "标题", "时间", "链接"],
+        [
+            [
+                escape(str(item.get("source", "Twitter"))),
+                escape(str(item.get("title", ""))),
+                escape(str(item.get("time", ""))),
+                f"<a href='{escape(str(item.get('link', '')))}'>{escape(str(item.get('link', '')))}</a>" if item.get("link") else "",
+            ]
+            for item in twitter_updates[:12]
+        ],
+    )
+
+    broker_html = []
+    if broker_reports:
+        by_broker = {}
+        for item in broker_reports:
+            by_broker.setdefault(item.get("broker", "未知券商"), []).append(item)
+        for broker, items in by_broker.items():
+            broker_html.append(f"<li><strong>{escape(str(broker))}</strong><ul>")
+            for it in items[:3]:
+                broker_html.append(f"<li>{escape(str(it.get('title', '')))}")
+                if it.get("link"):
+                    broker_html.append(
+                        f" - <a href='{escape(str(it.get('link', '')))}'>{escape(str(it.get('link', '')))}</a>"
+                    )
+                broker_html.append("</li>")
+            broker_html.append("</ul></li>")
+    broker_table_html = _render_html_table(
+        ["券商", "日期", "分类", "标题", "分析师"],
+        [
+            [
+                escape(str(item.get("broker", ""))),
+                escape(str(item.get("time", ""))),
+                escape(str(item.get("category", ""))),
+                escape(str(item.get("title", ""))),
+                escape(str(item.get("analyst", ""))),
+            ]
+            for item in broker_reports[:12]
+        ],
+    )
+
+    skill_html = []
+    for key, block in skill_blocks.items():
+        skill_items = ""
+        for it in block.get("items", [])[:3]:
+            repo = it.get("repo", "")
+            link = it.get("link", github_repo_link(repo))
+            skill_items += (
+                "<li><a href='"
+                f"{escape(link)}'>{escape(repo)}</a>｜"
+                f"星数: <code>{escape(str(it.get('currentStars', '')))}</code>｜7天增量: <code>{escape(str(it.get('delta7d', '')))}</code>｜"
+                f"{escape(str(it.get('highlights', it.get('why', ''))))}</li>"
+            )
+        skill_html.append(
+            f"<section class='card'><h3>{escape(block.get('title', key))}</h3>"
+            f"<p>说明：{escape(block.get('description', ''))}</p>"
+            f"<p>状态：{escape(block.get('status', ''))}</p>"
+            "<ul>"
+            f"{skill_items}"
+            "</ul></section>"
+        )
+
+    focused_html = []
+    if focused_blocks:
+        focused_html.append("<section class='card'><h2 class='main-title'>定向细分领域追踪</h2>")
+        for block in focused_blocks:
+            title = escape(block.get("field", ""))
+            if not title:
+                continue
+            focused_html.append(f"<h3>{title}</h3><ul>")
+            for item in block.get("items", [])[:4]:
+                item_title = escape(item.get("title", ""))
+                source = escape(item.get("source", ""))
+                time = escape(str(item.get("time", "")))
+                snippet = escape(item.get("snippet", ""))
+                link = escape(item.get("link", ""))
+                if not item_title:
+                    continue
+                focused_html.append(f"<li><strong>{item_title}</strong>（{source}{('，' + time) if time else ''})")
+                if snippet:
+                    focused_html.append(f"<br/>{snippet}")
+                if link:
+                    focused_html.append(f"<br/><a href='{link}'>{link}</a>")
+                focused_html.append("</li>")
+            focused_html.append("</ul>")
+        focused_html.append("</section>")
+
+    topic_list = "".join([f"<li>{escape(str(x.get('term', '')))}（{escape(str(x.get('count', 0)))}）</li>" for x in topic_summary])
+
+    sections = []
+    if tech_overview_blocks:
+        sections.append(
+            "<section class='card tech-wrap'><h2 class='main-title'>技术概要</h2>"
+            f"{''.join(tech_overview_blocks)}</section>"
+        )
+    if priority_html:
+        sections.append(
+            "<section class='card'><h2 class='main-title'>优先渠道（最近一周）：Claude Blog / OpenAI Research</h2>"
+            f"{''.join(priority_html)}</section>"
+        )
+    if ai_html:
+        sections.append(
+            "<section class='card'><h2 class='main-title'>AI 信息</h2>"
+            f"{''.join(ai_html)}</section>"
+        )
+    if skill_html:
+        sections.append(
+            "<section class='card'><h2 class='main-title'>SKILL Top3</h2>"
+            f"{''.join(skill_html)}</section>"
+        )
+    if focused_html:
+        sections.append("".join(focused_html))
+    if ag:
+        sections.append(
+            "<section class='card'>"
+            "<h2 class='main-title'>AG-UI 与趋势</h2>"
+            "<div class='card'><h3>AG-UI</h3>"
+            "<ul>"
+            f"<li>仓库：<a href='{escape(ag.get('link', 'https://github.com/ag-ui-protocol/ag-ui'))}'>{escape(ag.get('repo', 'ag-ui-protocol/ag-ui'))}</a></li>"
+            f"<li>链接：<a href='{escape(ag.get('link', 'https://github.com/ag-ui-protocol/ag-ui'))}'>https://github.com/ag-ui-protocol/ag-ui</a></li>"
+            f"<li>当前星标：{escape(str(ag.get('stars', 'N/A')))}</li>"
+            f"<li>描述：{escape(str(ag.get('description', '')))}</li>"
+            "</ul>"
+            "</div>"
+            "<div class='card'><h3>GitHub 周度项目（快速上升仓库）</h3><ul>{}</ul>{}</div>".format(
+                "".join(trend_list),
+                trend_table_html,
+            )
+            + "</section>"
+        )
+    if topic_list:
+        sections.append(f"<section class='card'><h2 class='main-title'>今日高频主题</h2><ul>{topic_list}</ul></section>")
+    if deep_dive and isinstance(deep_dive, dict) and deep_dive.get("repo"):
+        sections.append(
+            "<section class='card'>"
+            "<h2 class='main-title'>GitHub 高增长项目深度解读</h2>"
+            f"<h3><a href='{escape(deep_dive.get('link', github_repo_link(deep_dive.get('repo', ''))))}'>{escape(deep_dive.get('repo', ''))}</a></h3>"
+            f"<p>关注指标：⭐ {escape(str(deep_dive.get('stars', 0)))} / 7天增量 {escape(str(deep_dive.get('delta7d', 0)))}</p>"
+            f"<p><strong>解决问题：</strong>{escape(str(deep_dive.get('problem', '')))}</p>"
+            f"<p><strong>解决思路：</strong>{escape(str(deep_dive.get('solution', '')))}</p>"
+            f"<p><strong>架构设计：</strong>{escape(str(deep_dive.get('architecture', '')))}</p>"
+            "</section>"
+        )
+    if wechat_html:
+        sections.append("<section class='card'><h2 class='main-title'>WeChat Top20 AI 公告号</h2><ul>" + "".join(wechat_html) + "</ul>" + wechat_table_html + "</section>")
+    if twitter_html:
+        sections.append("<section class='card'><h2 class='main-title'>Twitter 美国科技公司 AI 动态</h2><ul>" + "".join(twitter_html) + "</ul>" + twitter_table_html + "</section>")
+    if broker_html:
+        sections.append("<section class='card'><h2 class='main-title'>券商 AI 研报（10 大）</h2><ul>" + "".join(broker_html) + "</ul>" + broker_table_html + "</section>")
+    if suggestions:
+        sections.append(f"<section class='card'><h2 class='main-title'>执行建议</h2><ul>{''.join([f'<li>{escape(str(s))}</li>' for s in suggestions])}</ul></section>")
+
+    if isinstance(policy, dict):
+        policy_html = (
+            f"<p>保留策略：最近{policy.get('retain_last', MAX_RECORDS)}条；清理旧记录 "
+            f"{policy.get('removed_old', 0)} 条；当前保留 {policy.get('remaining_records', '')} 条；"
+            f"7天关联窗口 {policy.get('merged_within_7d', RELATED_WINDOW_DAYS)} 天；"
+            f"今日是否合并：{'是' if policy.get('merged', False) else '否'}。</p>"
+        )
+    else:
+        policy_html = "<p>保留策略：最近14条，自动清理旧记录。</p>"
+    sections.append(
+        "<section class='card'><h2 class='main-title'>合并与差异</h2>"
+        f"<p>今日差异：{escape(report.get('diffSummary', ''))}</p>{policy_html}</section>"
+    )
+
+    source = escape(source_html)
+    return f"""
+<!doctype html>
+<html lang=\"zh-CN\">
+<head>
+  <meta charset=\"utf-8\" />
+  <title>{escape(report.get('title', 'AI 研究日报'))}</title>
+  <style>
+    :root {{
+      --rainbow: linear-gradient(120deg, #ff7eb3, #ffbf7e, #7cf7bf, #79d9ff, #7b9dff, #d88bff);
+      --ink: #1f2937;
+      --subtle: #64748b;
+      --line: #e2e8f0;
+      --card-bg: #ffffff;
+      --card-border: #dbeafe;
+      --chip: #eef2ff;
+      --chip-active: #dbeafe;
+      --shadow-soft: 0 10px 26px rgba(15, 23, 42, 0.09);
+    }}
+    body {{
+      font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
+      margin: 0;
+      color: var(--ink);
+      background:
+        radial-gradient(circle at 6% 12%, rgba(255, 211, 231, 0.45), transparent 36%),
+        radial-gradient(circle at 94% 0%, rgba(186, 233, 255, 0.45), transparent 40%),
+        linear-gradient(160deg, #f9fbff 0%, #fff8f0 100%);
+      min-height: 100vh;
+    }}
+    .page {{
+      max-width: 1120px;
+      margin: 16px auto 28px;
+      padding: 0 14px 28px;
+    }}
+    .hero {{
+      background: linear-gradient(135deg, #7f6cff 0%, #46a8ff 55%, #7ce8a8 100%);
+      color: #fff;
+      border-radius: 14px;
+      padding: 16px 20px;
+      margin-bottom: 14px;
+      box-shadow: var(--shadow-soft);
+    }}
+    h1 {{
+      margin: 0;
+      letter-spacing: 0.3px;
+      font-size: 1.45rem;
+    }}
+    .hero p {{
+      margin: 8px 0 0;
+      color: rgba(255, 255, 255, 0.95);
+      line-height: 1.65;
+    }}
+    h2 {{
+      margin: 24px 0 10px;
+      padding: 6px 10px;
+      border-radius: 10px;
+      display: inline-flex;
+      align-items: center;
+      background: linear-gradient(90deg, rgba(255, 140, 194, 0.2), rgba(124, 218, 255, 0.2), rgba(255, 220, 160, 0.2));
+      color: #1f2a44;
+      font-size: 1.12rem;
+    }}
+    .content {{
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 12px;
+    }}
+    .card {{
+      position: relative;
+      background: var(--card-bg);
+      padding: 14px 16px;
+      border-radius: 14px;
+      border: 1px solid var(--card-border);
+      margin-bottom: 12px;
+      box-shadow: var(--shadow-soft);
+      overflow: hidden;
+      backdrop-filter: blur(0.5px);
+    }}
+    .card::before {{
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 4px;
+      background: var(--rainbow);
+    }}
+    .card::after {{
+      content: '';
+      position: absolute;
+      left: 0;
+      top: 4px;
+      width: 5px;
+      height: calc(100% - 4px);
+      background: linear-gradient(180deg, #ff66c4 0%, #ffb16e 25%, #fff38f 50%, #7ef7c1 75%, #7ac3ff 100%);
+    }}
+    .card h3 {{ margin-top: 2px; position: relative; z-index: 1; }}
+    code {{ background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.95rem; }}
+    a {{ color: #5b4bff; text-underline-offset: 2px; }}
+    ul {{ margin: 8px 0 0; padding-left: 20px; }}
+    p {{ line-height: 1.7; }}
+    .main-title {{ margin: 0 0 12px; display: block; }}
+    .tech-wrap {{ display: grid; gap: 12px; }}
+    .report-table-wrap {{ margin-top: 14px; overflow-x: auto; }}
+    .report-table {{
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 0.92rem;
+      background: rgba(255, 255, 255, 0.92);
+      border-radius: 10px;
+      overflow: hidden;
+    }}
+    .report-table th,
+    .report-table td {{
+      padding: 10px 12px;
+      border-bottom: 1px solid var(--line);
+      text-align: left;
+      vertical-align: top;
+    }}
+    .report-table th {{
+      background: linear-gradient(90deg, rgba(123, 157, 255, 0.12), rgba(124, 247, 191, 0.12));
+      font-weight: 600;
+      white-space: nowrap;
+    }}
+    .report-table tr:last-child td {{ border-bottom: none; }}
+    @media (max-width: 920px) {{}}
+  </style>
+</head>
+<body>
+  <div class=\"page\">
+  <div class=\"hero\">
+    <h1>{escape(report.get('title', 'AI 研究日报'))}</h1>
+    <p>执行时间：{escape(report['date'])}（{escape(report['timezone'])}）<br/>数据源：{source}</p>
+  </div>
+
+  <div class=\"content\">
+    {''.join(sections)}
+  </div>
+</div>
+</body>
+</html>
+""".strip()
+
+
+def _markdown_cell(value: object) -> str:
+    text = str(value or "").replace("\n", " ").replace("\r", " ").strip()
+    return text.replace("|", "/")
+
+
+def _render_markdown_table(headers: List[str], rows: List[List[object]]) -> List[str]:
+    if not headers or not rows:
+        return []
+    out = [
+        "| " + " | ".join([_markdown_cell(h) for h in headers]) + " |",
+        "| " + " | ".join(["---"] * len(headers)) + " |",
+    ]
+    for row in rows:
+        if len(row) != len(headers):
+            continue
+        out.append("| " + " | ".join([_markdown_cell(cell) for cell in row]) + " |")
+    return out
+
+
+def _render_html_table(headers: List[str], rows: List[List[object]]) -> str:
+    if not headers or not rows:
+        return ""
+    thead = "".join([f"<th>{escape(str(h))}</th>" for h in headers])
+    body_rows = []
+    for row in rows:
+        if len(row) != len(headers):
+            continue
+        body_rows.append("<tr>" + "".join([f"<td>{cell}</td>" for cell in row]) + "</tr>")
+    if not body_rows:
+        return ""
+    return (
+        "<div class='report-table-wrap'>"
+        "<table class='report-table'>"
+        f"<thead><tr>{thead}</tr></thead>"
+        f"<tbody>{''.join(body_rows)}</tbody>"
+        "</table>"
+        "</div>"
+    )
 
 
 def collect_report_catalog() -> List[Dict[str, str]]:
@@ -3770,99 +5645,159 @@ def archive_daily_brief_files(reference_dt: datetime) -> Dict[str, object]:
 
 
 def run() -> Dict:
+    started_at = time.monotonic()
+    previous_timeout_handler = _install_runtime_timeout()
     now = datetime.now().astimezone().replace(microsecond=0)
-    archive_summary = archive_daily_brief_files(now)
-    history = load_history()
-    executed_dates = {str(item.get("date", "")).strip() for item in history if isinstance(item, dict)}
-    target_dates = [now.date() - timedelta(days=i) for i in range(DAILY_AI_BRIEF_CATCHUP_DAYS)]
-    missing_dates = [d for d in reversed(target_dates) if d.isoformat() not in executed_dates]
+    timeout_reason = ""
+    try:
+        archive_summary = archive_daily_brief_files(now)
+        history = load_history()
+        executed_dates = {str(item.get("date", "")).strip() for item in history if isinstance(item, dict)}
+        target_dates = [now.date() - timedelta(days=i) for i in range(DAILY_AI_BRIEF_CATCHUP_DAYS)]
+        missing_dates = [d for d in reversed(target_dates) if d.isoformat() not in executed_dates]
 
-    generated_reports: List[Dict] = []
-    merged_any = False
-    for d in missing_dates:
-        report_for_date = datetime(d.year, d.month, d.day, 9, 15, 0, 0, tzinfo=now.tzinfo)
-        report = build_today_report(as_of=report_for_date, history=history)
-        merged, merged_target = merge_if_related(history, report)
-        if not merged:
-            report["diffSummary"] = build_diff_summary(report, None)
-            history.append(report)
+        generated_reports: List[Dict] = []
+        merged_any = False
+        for d in missing_dates:
+            try:
+                _check_runtime_deadline(started_at)
+                report_for_date = datetime(d.year, d.month, d.day, 9, 15, 0, 0, tzinfo=now.tzinfo)
+                report = build_today_report(as_of=report_for_date, history=history)
+            except DailyBriefTimeout as exc:
+                timeout_reason = str(exc)
+                break
+            merged, merged_target = merge_if_related(history, report)
+            if not merged:
+                report["diffSummary"] = build_diff_summary(report, None)
+                history.append(report)
+            else:
+                merged_any = True
+                report["diffSummary"] = build_diff_summary(report, merged_target)
+                merged_target["updated_at"] = datetime.now().astimezone().isoformat()
+            generated_reports.append(report)
+
+        purge = prune_history(history)
+        policy = {
+            "retain_last": MAX_RECORDS,
+            "removed_old": purge["removed"],
+            "remaining_records": purge["remaining"],
+            "merged": bool(merged_any),
+            "merged_within_7d": str(RELATED_WINDOW_DAYS),
+            "backfill_days": len(missing_dates),
+            "backfill_dates": [d.isoformat() for d in missing_dates],
+            "completed_dates": [report["date"] for report in generated_reports],
+            "timed_out": bool(timeout_reason),
+            "timeout_seconds": DAILY_AI_BRIEF_MAX_RUNTIME_SECONDS,
+        }
+        if timeout_reason:
+            policy["timeout_reason"] = timeout_reason
+        for h in history:
+            h["record_policy"] = policy
+        save_history(history)
+
+        generated_outputs = []
+        REPORT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+        for report in generated_reports:
+            md = format_markdown(report)
+            html = format_html(report)
+            out_file = REPORT_OUTPUT_DIR / f"daily_ai_brief_{report['date']}.md"
+            out_html_file = REPORT_OUTPUT_DIR / f"daily_ai_brief_{report['date']}.html"
+            with out_file.open("w", encoding="utf-8") as f:
+                f.write(md)
+            with out_html_file.open("w", encoding="utf-8") as f:
+                f.write(html)
+            generated_outputs.append({"date": report["date"], "markdown": str(out_file), "html": str(out_html_file)})
+
+        report_catalog = collect_report_catalog()
+        report_portal_html = build_reports_portal_html(report_catalog)
+        portal_file = REPORT_OUTPUT_DIR / "daily_ai_calendar_portal.html"
+        legacy_portal_file = REPORT_OUTPUT_DIR / "daily_ai_brief_portal.html"
+        with portal_file.open("w", encoding="utf-8") as f:
+            f.write(report_portal_html)
+        with legacy_portal_file.open("w", encoding="utf-8") as f:
+            f.write(report_portal_html)
+
+        if generated_reports:
+            sent_report = generated_reports[-1]
+        elif history:
+            sent_report = history[-1]
         else:
-            merged_any = True
-            report["diffSummary"] = build_diff_summary(report, merged_target)
-            merged_target["updated_at"] = datetime.now().astimezone().isoformat()
-        generated_reports.append(report)
+            sent_report = {
+                "date": now.date().isoformat(),
+                "title": "AI 研究日报",
+                "aiHighlights": [],
+                "trendProjects": [],
+                "suggestions": [],
+                "diffSummary": timeout_reason or "未生成日报内容。",
+            }
 
-    purge = prune_history(history)
-    policy = {
-        "retain_last": MAX_RECORDS,
-        "removed_old": purge["removed"],
-        "remaining_records": purge["remaining"],
-        "merged": bool(merged_any),
-        "merged_within_7d": str(RELATED_WINDOW_DAYS),
-        "backfill_days": len(missing_dates),
-        "backfill_dates": [d.isoformat() for d in missing_dates],
-    }
-    for h in history:
-        h["record_policy"] = policy
-    save_history(history)
-
-    generated_outputs = []
-    REPORT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-    for report in generated_reports:
-        md = format_markdown(report)
-        html = format_html(report)
-        out_file = REPORT_OUTPUT_DIR / f"daily_ai_brief_{report['date']}.md"
-        out_html_file = REPORT_OUTPUT_DIR / f"daily_ai_brief_{report['date']}.html"
-        with out_file.open("w", encoding="utf-8") as f:
-            f.write(md)
-        with out_html_file.open("w", encoding="utf-8") as f:
-            f.write(html)
-        generated_outputs.append({"date": report["date"], "markdown": str(out_file), "html": str(out_html_file)})
-
-    report_catalog = collect_report_catalog()
-    report_portal_html = build_reports_portal_html(report_catalog)
-    portal_file = REPORT_OUTPUT_DIR / "daily_ai_calendar_portal.html"
-    legacy_portal_file = REPORT_OUTPUT_DIR / "daily_ai_brief_portal.html"
-    with portal_file.open("w", encoding="utf-8") as f:
-        f.write(report_portal_html)
-    with legacy_portal_file.open("w", encoding="utf-8") as f:
-        f.write(report_portal_html)
-
-    if generated_reports:
-        sent_report = generated_reports[-1]
-    elif history:
-        sent_report = history[-1]
-    else:
-        sent_report = build_today_report(as_of=now, history=history)
-        sent_report["diffSummary"] = build_diff_summary(sent_report, None)
-
-    sent_md = format_markdown(sent_report)
-    sent_html = format_html(sent_report)
-    out_file = REPORT_OUTPUT_DIR / f"daily_ai_brief_{sent_report['date']}.md"
-    out_html_file = REPORT_OUTPUT_DIR / f"daily_ai_brief_{sent_report['date']}.html"
-    if not out_file.exists():
-        with out_file.open("w", encoding="utf-8") as f:
-            f.write(sent_md)
-    if not out_html_file.exists():
-        with out_html_file.open("w", encoding="utf-8") as f:
-            f.write(sent_html)
-    email_result = send_report_email(sent_md, sent_html, f"{sent_report.get('title', 'AI 研究日报')}", str(out_html_file))
-    return {
-        "markdown": sent_md,
-        "html": sent_html,
-        "email": email_result,
-        "state_file": str(STATE_FILE),
-        "output_file": str(out_file),
-        "output_html_file": str(out_html_file),
-        "portal_html_file": str(portal_file),
-        "portal_html_file_legacy": str(legacy_portal_file),
-        "generated_outputs": generated_outputs,
-        "generated_dates": [x["date"] for x in generated_reports],
-        "backfilled_dates": policy["backfill_dates"],
-        "merged": merged_any,
-        "prune": purge,
-        "archive_daily_ai_brief": archive_summary,
-    }
+        sent_md = format_markdown(sent_report)
+        sent_html = format_html(sent_report)
+        out_file = REPORT_OUTPUT_DIR / f"daily_ai_brief_{sent_report['date']}.md"
+        out_html_file = REPORT_OUTPUT_DIR / f"daily_ai_brief_{sent_report['date']}.html"
+        if not timeout_reason:
+            if not out_file.exists():
+                with out_file.open("w", encoding="utf-8") as f:
+                    f.write(sent_md)
+            if not out_html_file.exists():
+                with out_html_file.open("w", encoding="utf-8") as f:
+                    f.write(sent_html)
+        inspection = _build_inspection_summary(
+            generated_reports=generated_reports,
+            policy=policy,
+            merged=merged_any,
+            prune=purge,
+            archive_summary=archive_summary,
+        )
+        inspection_text = _format_inspection_text(inspection)
+        if timeout_reason:
+            email_result = {
+                "status": "skip",
+                "reason": timeout_reason,
+                "transport": "timeout_guard",
+                "email_config": _email_config_snapshot(),
+            }
+        else:
+            try:
+                _check_runtime_deadline(started_at)
+                email_result = send_report_email(
+                    sent_md,
+                    sent_html,
+                    f"{sent_report.get('title', 'AI 研究日报')}",
+                    str(out_html_file),
+                    inspection_summary=inspection_text,
+                )
+            except DailyBriefTimeout as exc:
+                timeout_reason = str(exc)
+                email_result = {
+                    "status": "skip",
+                    "reason": timeout_reason,
+                    "transport": "timeout_guard",
+                    "email_config": _email_config_snapshot(),
+                }
+        return {
+            "markdown": sent_md,
+            "html": sent_html,
+            "email": email_result,
+            "state_file": str(STATE_FILE),
+            "output_file": str(out_file),
+            "output_html_file": str(out_html_file),
+            "portal_html_file": str(portal_file),
+            "portal_html_file_legacy": str(legacy_portal_file),
+            "generated_outputs": generated_outputs,
+            "generated_dates": [x["date"] for x in generated_reports],
+            "backfilled_dates": policy["backfill_dates"],
+            "timed_out": bool(timeout_reason),
+            "timeout_reason": timeout_reason,
+            "timeout_seconds": DAILY_AI_BRIEF_MAX_RUNTIME_SECONDS,
+            "merged": merged_any,
+            "prune": purge,
+            "archive_daily_ai_brief": archive_summary,
+            "inspection": inspection,
+            "inspection_text": inspection_text,
+        }
+    finally:
+        _clear_runtime_timeout(previous_timeout_handler)
 
 
 if __name__ == "__main__":
@@ -3900,6 +5835,11 @@ if __name__ == "__main__":
             print(f"EMAIL: error -> {email.get('reason')}")
         if email.get("status") != "sent":
             print(f"EMAIL_CONFIG: {json.dumps(email.get('email_config', {}), ensure_ascii=False)}")
+        if r.get("timed_out"):
+            print(f"TIMEOUT: {r.get('timeout_reason')} ({r.get('timeout_seconds')}s)")
+        if isinstance(r.get("inspection_text"), str):
+            print("INSPECTION_SUMMARY:")
+            print(r["inspection_text"])
         print(f"PORTAL: {r.get('portal_html_file')}")
         print(f"PORTAL_LEGACY: {r.get('portal_html_file_legacy')}")
         print(f"MERGED: {r['merged']}")

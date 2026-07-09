@@ -1,0 +1,16 @@
+# AI daily report local runtime config.
+# Copy to report.config and fill in local secrets. Do not commit report.config.
+DAILY_AI_BRIEF_EMAIL_TO=recipient1@example.com,recipient2@example.com
+DAILY_AI_BRIEF_SEND_EMAIL=1
+DAILY_AI_BRIEF_EMAIL_TRANSPORT=auto
+DAILY_AI_BRIEF_SMTP_USER=your_smtp_user@example.com
+DAILY_AI_BRIEF_SMTP_PASSWORD=your_app_password
+DAILY_AI_BRIEF_SMTP_HOST=smtp.gmail.com
+DAILY_AI_BRIEF_SMTP_PORT=587
+DAILY_AI_BRIEF_SMTP_STARTTLS=1
+DAILY_AI_BRIEF_SMTP_SSL=0
+DAILY_AI_BRIEF_FROM=your_smtp_user@example.com
+DAILY_AI_BRIEF_CATCHUP_DAYS=3
+DAILY_AI_BRIEF_RETRY_BASE_SECONDS=900
+DAILY_AI_BRIEF_RETRY_MAX_DELAY_SECONDS=14400
+DAILY_AI_BRIEF_RETRY_MAX_AGE_SECONDS=86400
