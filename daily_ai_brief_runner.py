@@ -5241,31 +5241,14 @@ def build_reports_portal_html(reports: List[Dict[str, str]]) -> str:
         for date_key, _, _, title, html, md in parsed:
             report_by_date[date_key] = {"date": date_key, "title": title, "html": html, "md": md}
 
-        calendar_sections = []
-        years: Dict[int, List[tuple[int, List[str]]]] = {}
-        for (year, month), dates in sorted(grouped.items(), key=lambda x: (x[0][0], x[0][1])):
-            years.setdefault(year, []).append((month, dates))
-
-        latest_year = None
-        now = datetime.now()
-        if years:
-            latest_year = max(years.keys())
-            if latest_year > now.year:
-                latest_year = now.year
-
-        for year in sorted(years.keys()):
-            month_sections = []
-            for month, dates in years[year]:
-                month_sections.append(_build_calendar_block(month=month, year=year, dates_with_report=set(dates)))
-            year_open = "open" if year == latest_year else ""
-            calendar_sections.append(
-                "<details class='year-block' {open_attr}><summary>{year} 年 ({count} 月)</summary>{months}</details>"
-                .replace("{open_attr}", f"{year_open}".strip() and "open")
-                .replace("{year}", str(year))
-                .replace("{count}", str(len(years[year])))
-                .replace("{months}", "".join(month_sections))
-            )
-        calendar_body = "".join(calendar_sections)
+        latest_year = parsed[-1][1] if parsed else datetime.now().year
+        latest_month = parsed[-1][2] if parsed else datetime.now().month
+        latest_key = (latest_year, latest_month)
+        calendar_body = _build_calendar_block(
+            month=latest_month,
+            year=latest_year,
+            dates_with_report=set(grouped.get(latest_key, [])),
+        )
 
     return f"""
 <!doctype html>
@@ -5309,7 +5292,7 @@ def build_reports_portal_html(reports: List[Dict[str, str]]) -> str:
       align-items: stretch;
       margin-bottom: 14px;
     }}
-    .calendar-column {{ width: 50%; }}
+    .calendar-column {{ width: min(360px, 34%); flex: 0 0 min(360px, 34%); }}
     .preview-column {{ flex: 1; }}
     .section-title {{
       margin: 0 0 8px;
@@ -5322,10 +5305,11 @@ def build_reports_portal_html(reports: List[Dict[str, str]]) -> str:
       border-radius: 14px;
       padding: 12px;
       box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-      min-height: 420px;
       position: relative;
       overflow: hidden;
     }}
+    .calendar-card {{ min-height: 0; }}
+    .preview-card {{ min-height: 420px; }}
     .calendar-card::before, .preview-card::before {{
       content: '';
       position: absolute;
@@ -5333,40 +5317,22 @@ def build_reports_portal_html(reports: List[Dict[str, str]]) -> str:
       height: 4px;
       background: var(--rainbow);
     }}
-    .month-block {{ margin-bottom: 18px; }}
+    .month-block {{ margin-bottom: 0; }}
     .month-block h4 {{
-      margin: 8px 0 10px;
+      margin: 8px 0 8px;
       padding-left: 4px;
-    }}
-    .year-block {{
-      border: 1px solid #e2e8f0;
-      border-radius: 10px;
-      padding: 8px 10px;
-      margin-bottom: 10px;
-      background: #f8fafc;
-    }}
-    .year-block summary {{
-      cursor: pointer;
-      font-weight: 600;
-      color: #1e293b;
-      padding: 2px 0;
-    }}
-    .year-block[open] {{ background: #f1f5ff; }}
-    .year-block summary::-webkit-details-marker {{
-      display: inline-block;
-      margin-right: 6px;
     }}
     .calendar-grid {{
       border: 1px solid #e2e8f0;
       border-radius: 12px;
-      padding: 8px;
+      padding: 7px;
       background: #f8fafc;
     }}
     .weekday {{
       display: grid;
       grid-template-columns: repeat(7, 1fr);
       text-align: center;
-      font-size: 0.84rem;
+      font-size: 0.75rem;
       color: var(--subtle);
       margin-bottom: 4px;
     }}
@@ -5374,18 +5340,18 @@ def build_reports_portal_html(reports: List[Dict[str, str]]) -> str:
       list-style: none;
       display: grid;
       grid-template-columns: repeat(7, 1fr);
-      gap: 6px;
+      gap: 4px;
       padding: 0;
-      margin: 6px 0;
+      margin: 4px 0;
     }}
     .day-cell {{
       width: 100%;
-      height: 38px;
+      height: 30px;
       display: flex;
       justify-content: center;
       align-items: center;
-      border-radius: 9px;
-      font-size: 0.92rem;
+      border-radius: 8px;
+      font-size: 0.82rem;
       box-sizing: border-box;
     }}
     .day-cell.empty {{ color: transparent; }}
@@ -5440,7 +5406,7 @@ def build_reports_portal_html(reports: List[Dict[str, str]]) -> str:
     a {{ color: #4f46e5; }}
     @media (max-width: 980px) {{
       .top-area {{ flex-direction: column; }}
-      .calendar-column {{ width: 100%; }}
+      .calendar-column {{ width: 100%; flex-basis: auto; }}
       .preview-frame {{ height: 420px; }}
     }}
   </style>
@@ -5454,7 +5420,7 @@ def build_reports_portal_html(reports: List[Dict[str, str]]) -> str:
 
     <div class=\"top-area\">
       <div class=\"calendar-column\">
-        <h2 class=\"section-title\">日报日历（按年月）</h2>
+        <h2 class=\"section-title\">日报日历</h2>
         <div class=\"calendar-card\">
           {calendar_body}
         </div>

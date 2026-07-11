@@ -39,7 +39,7 @@
       align-items: stretch;
       margin-bottom: 14px;
     }
-    .calendar-column { width: 50%; }
+    .calendar-column { width: min(360px, 34%); flex: 0 0 min(360px, 34%); }
     .preview-column { flex: 1; }
     .section-title {
       margin: 0 0 8px;
@@ -52,10 +52,11 @@
       border-radius: 14px;
       padding: 12px;
       box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08);
-      min-height: 420px;
       position: relative;
       overflow: hidden;
     }
+    .calendar-card { min-height: 0; }
+    .preview-card { min-height: 420px; }
     .calendar-card::before, .preview-card::before {
       content: '';
       position: absolute;
@@ -63,40 +64,22 @@
       height: 4px;
       background: var(--rainbow);
     }
-    .month-block { margin-bottom: 18px; }
+    .month-block { margin-bottom: 0; }
     .month-block h4 {
-      margin: 8px 0 10px;
+      margin: 8px 0 8px;
       padding-left: 4px;
-    }
-    .year-block {
-      border: 1px solid #e2e8f0;
-      border-radius: 10px;
-      padding: 8px 10px;
-      margin-bottom: 10px;
-      background: #f8fafc;
-    }
-    .year-block summary {
-      cursor: pointer;
-      font-weight: 600;
-      color: #1e293b;
-      padding: 2px 0;
-    }
-    .year-block[open] { background: #f1f5ff; }
-    .year-block summary::-webkit-details-marker {
-      display: inline-block;
-      margin-right: 6px;
     }
     .calendar-grid {
       border: 1px solid #e2e8f0;
       border-radius: 12px;
-      padding: 8px;
+      padding: 7px;
       background: #f8fafc;
     }
     .weekday {
       display: grid;
       grid-template-columns: repeat(7, 1fr);
       text-align: center;
-      font-size: 0.84rem;
+      font-size: 0.75rem;
       color: var(--subtle);
       margin-bottom: 4px;
     }
@@ -104,18 +87,18 @@
       list-style: none;
       display: grid;
       grid-template-columns: repeat(7, 1fr);
-      gap: 6px;
+      gap: 4px;
       padding: 0;
-      margin: 6px 0;
+      margin: 4px 0;
     }
     .day-cell {
       width: 100%;
-      height: 38px;
+      height: 30px;
       display: flex;
       justify-content: center;
       align-items: center;
-      border-radius: 9px;
-      font-size: 0.92rem;
+      border-radius: 8px;
+      font-size: 0.82rem;
       box-sizing: border-box;
     }
     .day-cell.empty { color: transparent; }
@@ -170,7 +153,7 @@
     a { color: #4f46e5; }
     @media (max-width: 980px) {
       .top-area { flex-direction: column; }
-      .calendar-column { width: 100%; }
+      .calendar-column { width: 100%; flex-basis: auto; }
       .preview-frame { height: 420px; }
     }
   </style>
@@ -184,9 +167,9 @@
 
     <div class="top-area">
       <div class="calendar-column">
-        <h2 class="section-title">日报日历（按年月）</h2>
+        <h2 class="section-title">日报日历</h2>
         <div class="calendar-card">
-          <details class='year-block' open><summary>2026 年 (2 月)</summary><section class='month-block'><h4>05月</h4><div class='calendar-grid'><div class='weekday'><span>周一</span><span>周二</span><span>周三</span><span>周四</span><span>周五</span><span>周六</span><span>周日</span></div><ul class='week'><li class='day-cell empty'></li><li class='day-cell empty'></li><li class='day-cell empty'></li><li class='day-cell empty'></li><li><span class='day-cell no-report'>01</span></li><li><span class='day-cell no-report'>02</span></li><li><span class='day-cell no-report'>03</span></li></ul><ul class='week'><li><span class='day-cell no-report'>04</span></li><li><span class='day-cell no-report'>05</span></li><li><span class='day-cell no-report'>06</span></li><li><span class='day-cell no-report'>07</span></li><li><span class='day-cell no-report'>08</span></li><li><span class='day-cell no-report'>09</span></li><li><span class='day-cell no-report'>10</span></li></ul><ul class='week'><li><span class='day-cell no-report'>11</span></li><li><span class='day-cell no-report'>12</span></li><li><span class='day-cell no-report'>13</span></li><li><span class='day-cell no-report'>14</span></li><li><span class='day-cell no-report'>15</span></li><li><span class='day-cell no-report'>16</span></li><li><span class='day-cell no-report'>17</span></li></ul><ul class='week'><li><span class='day-cell no-report'>18</span></li><li><span class='day-cell no-report'>19</span></li><li><span class='day-cell no-report'>20</span></li><li><span class='day-cell no-report'>21</span></li><li><span class='day-cell no-report'>22</span></li><li><span class='day-cell no-report'>23</span></li><li><span class='day-cell no-report'>24</span></li></ul><ul class='week'><li><span class='day-cell no-report'>25</span></li><li><button type='button' class='day-cell has-report' data-date='2026-05-26'>26</button></li><li><span class='day-cell no-report'>27</span></li><li><span class='day-cell no-report'>28</span></li><li><span class='day-cell no-report'>29</span></li><li><span class='day-cell no-report'>30</span></li><li><span class='day-cell no-report'>31</span></li></ul></div></section><section class='month-block'><h4>06月</h4><div class='calendar-grid'><div class='weekday'><span>周一</span><span>周二</span><span>周三</span><span>周四</span><span>周五</span><span>周六</span><span>周日</span></div><ul class='week'><li><span class='day-cell no-report'>01</span></li><li><span class='day-cell no-report'>02</span></li><li><span class='day-cell no-report'>03</span></li><li><span class='day-cell no-report'>04</span></li><li><button type='button' class='day-cell has-report' data-date='2026-06-05'>05</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-06'>06</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-07'>07</button></li></ul><ul class='week'><li><button type='button' class='day-cell has-report' data-date='2026-06-08'>08</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-09'>09</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-10'>10</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-11'>11</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-12'>12</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-13'>13</button></li><li><button type='button' class='day-cell has-report' data-date='2026-06-14'>14</button></li></ul><ul class='week'><li><span class='day-cell no-report'>15</span></li><li><span class='day-cell no-report'>16</span></li><li><span class='day-cell no-report'>17</span></li><li><span class='day-cell no-report'>18</span></li><li><span class='day-cell no-report'>19</span></li><li><span class='day-cell no-report'>20</span></li><li><span class='day-cell no-report'>21</span></li></ul><ul class='week'><li><span class='day-cell no-report'>22</span></li><li><span class='day-cell no-report'>23</span></li><li><span class='day-cell no-report'>24</span></li><li><span class='day-cell no-report'>25</span></li><li><span class='day-cell no-report'>26</span></li><li><span class='day-cell no-report'>27</span></li><li><span class='day-cell no-report'>28</span></li></ul><ul class='week'><li><span class='day-cell no-report'>29</span></li><li><span class='day-cell no-report'>30</span></li><li class='day-cell empty'></li><li class='day-cell empty'></li><li class='day-cell empty'></li><li class='day-cell empty'></li><li class='day-cell empty'></li></ul></div></section></details>
+          <section class='month-block'><h4>07月</h4><div class='calendar-grid'><div class='weekday'><span>周一</span><span>周二</span><span>周三</span><span>周四</span><span>周五</span><span>周六</span><span>周日</span></div><ul class='week'><li class='day-cell empty'></li><li class='day-cell empty'></li><li><button type='button' class='day-cell has-report' data-date='2026-07-01'>01</button></li><li><button type='button' class='day-cell has-report' data-date='2026-07-02'>02</button></li><li><button type='button' class='day-cell has-report' data-date='2026-07-03'>03</button></li><li><button type='button' class='day-cell has-report' data-date='2026-07-04'>04</button></li><li><button type='button' class='day-cell has-report' data-date='2026-07-05'>05</button></li></ul><ul class='week'><li><button type='button' class='day-cell has-report' data-date='2026-07-06'>06</button></li><li><button type='button' class='day-cell has-report' data-date='2026-07-07'>07</button></li><li><button type='button' class='day-cell has-report' data-date='2026-07-08'>08</button></li><li><button type='button' class='day-cell has-report' data-date='2026-07-09'>09</button></li><li><button type='button' class='day-cell has-report' data-date='2026-07-10'>10</button></li><li><button type='button' class='day-cell has-report' data-date='2026-07-11'>11</button></li><li><span class='day-cell no-report'>12</span></li></ul><ul class='week'><li><span class='day-cell no-report'>13</span></li><li><span class='day-cell no-report'>14</span></li><li><span class='day-cell no-report'>15</span></li><li><span class='day-cell no-report'>16</span></li><li><span class='day-cell no-report'>17</span></li><li><span class='day-cell no-report'>18</span></li><li><span class='day-cell no-report'>19</span></li></ul><ul class='week'><li><span class='day-cell no-report'>20</span></li><li><span class='day-cell no-report'>21</span></li><li><span class='day-cell no-report'>22</span></li><li><span class='day-cell no-report'>23</span></li><li><span class='day-cell no-report'>24</span></li><li><span class='day-cell no-report'>25</span></li><li><span class='day-cell no-report'>26</span></li></ul><ul class='week'><li><span class='day-cell no-report'>27</span></li><li><span class='day-cell no-report'>28</span></li><li><span class='day-cell no-report'>29</span></li><li><span class='day-cell no-report'>30</span></li><li><span class='day-cell no-report'>31</span></li><li class='day-cell empty'></li><li class='day-cell empty'></li></ul></div></section>
         </div>
       </div>
       <div class="preview-column">
@@ -212,7 +195,7 @@
   </div>
 
   <script>
-    const reports = {"2026-05-26": {"date": "2026-05-26", "title": "AI 与个人信息日报（2026-05-26）", "html": "daily_ai_brief_2026-05-26.html", "md": "daily_ai_brief_2026-05-26.md"}, "2026-06-05": {"date": "2026-06-05", "title": "AI 研究日报（2026-06-05）", "html": "daily_ai_brief_2026-06-05.html", "md": "daily_ai_brief_2026-06-05.md"}, "2026-06-06": {"date": "2026-06-06", "title": "AI 研究日报（2026-06-06）", "html": "daily_ai_brief_2026-06-06.html", "md": "daily_ai_brief_2026-06-06.md"}, "2026-06-07": {"date": "2026-06-07", "title": "AI 研究日报（2026-06-07）", "html": "daily_ai_brief_2026-06-07.html", "md": "daily_ai_brief_2026-06-07.md"}, "2026-06-08": {"date": "2026-06-08", "title": "AI 研究日报（2026-06-08）", "html": "daily_ai_brief_2026-06-08.html", "md": "daily_ai_brief_2026-06-08.md"}, "2026-06-09": {"date": "2026-06-09", "title": "AI 研究日报（2026-06-09）", "html": "daily_ai_brief_2026-06-09.html", "md": "daily_ai_brief_2026-06-09.md"}, "2026-06-10": {"date": "2026-06-10", "title": "AI 研究日报（2026-06-10）", "html": "daily_ai_brief_2026-06-10.html", "md": "daily_ai_brief_2026-06-10.md"}, "2026-06-11": {"date": "2026-06-11", "title": "AI 研究日报（2026-06-11）", "html": "daily_ai_brief_2026-06-11.html", "md": "daily_ai_brief_2026-06-11.md"}, "2026-06-12": {"date": "2026-06-12", "title": "AI 研究日报（2026-06-12）", "html": "daily_ai_brief_2026-06-12.html", "md": "daily_ai_brief_2026-06-12.md"}, "2026-06-13": {"date": "2026-06-13", "title": "AI 研究日报（2026-06-13）", "html": "daily_ai_brief_2026-06-13.html", "md": "daily_ai_brief_2026-06-13.md"}, "2026-06-14": {"date": "2026-06-14", "title": "AI 研究日报（2026-06-14）", "html": "daily_ai_brief_2026-06-14.html", "md": "daily_ai_brief_2026-06-14.md"}};
+    const reports = {"2026-05-26": {"date": "2026-05-26", "title": "AI 与个人信息日报（2026-05-26）", "html": "daily_ai_brief_2026-05-26.html", "md": "daily_ai_brief_2026-05-26.md"}, "2026-06-05": {"date": "2026-06-05", "title": "AI 研究日报（2026-06-05）", "html": "daily_ai_brief_2026-06-05.html", "md": "daily_ai_brief_2026-06-05.md"}, "2026-06-06": {"date": "2026-06-06", "title": "AI 研究日报（2026-06-06）", "html": "daily_ai_brief_2026-06-06.html", "md": "daily_ai_brief_2026-06-06.md"}, "2026-06-07": {"date": "2026-06-07", "title": "AI 研究日报（2026-06-07）", "html": "daily_ai_brief_2026-06-07.html", "md": "daily_ai_brief_2026-06-07.md"}, "2026-06-08": {"date": "2026-06-08", "title": "AI 研究日报（2026-06-08）", "html": "daily_ai_brief_2026-06-08.html", "md": "daily_ai_brief_2026-06-08.md"}, "2026-06-09": {"date": "2026-06-09", "title": "AI 研究日报（2026-06-09）", "html": "daily_ai_brief_2026-06-09.html", "md": "daily_ai_brief_2026-06-09.md"}, "2026-06-10": {"date": "2026-06-10", "title": "AI 研究日报（2026-06-10）", "html": "daily_ai_brief_2026-06-10.html", "md": "daily_ai_brief_2026-06-10.md"}, "2026-06-11": {"date": "2026-06-11", "title": "AI 研究日报（2026-06-11）", "html": "daily_ai_brief_2026-06-11.html", "md": "daily_ai_brief_2026-06-11.md"}, "2026-06-12": {"date": "2026-06-12", "title": "AI 研究日报（2026-06-12）", "html": "daily_ai_brief_2026-06-12.html", "md": "daily_ai_brief_2026-06-12.md"}, "2026-06-13": {"date": "2026-06-13", "title": "AI 研究日报（2026-06-13）", "html": "daily_ai_brief_2026-06-13.html", "md": "daily_ai_brief_2026-06-13.md"}, "2026-06-14": {"date": "2026-06-14", "title": "AI 研究日报（2026-06-14）", "html": "daily_ai_brief_2026-06-14.html", "md": "daily_ai_brief_2026-06-14.md"}, "2026-06-15": {"date": "2026-06-15", "title": "AI 研究日报（2026-06-15）", "html": "daily_ai_brief_2026-06-15.html", "md": "daily_ai_brief_2026-06-15.md"}, "2026-06-16": {"date": "2026-06-16", "title": "AI 研究日报（2026-06-16）", "html": "daily_ai_brief_2026-06-16.html", "md": "daily_ai_brief_2026-06-16.md"}, "2026-06-17": {"date": "2026-06-17", "title": "AI 研究日报（2026-06-17）", "html": "daily_ai_brief_2026-06-17.html", "md": "daily_ai_brief_2026-06-17.md"}, "2026-06-18": {"date": "2026-06-18", "title": "AI 研究日报（2026-06-18）", "html": "daily_ai_brief_2026-06-18.html", "md": "daily_ai_brief_2026-06-18.md"}, "2026-06-19": {"date": "2026-06-19", "title": "AI 研究日报（2026-06-19）", "html": "daily_ai_brief_2026-06-19.html", "md": "daily_ai_brief_2026-06-19.md"}, "2026-06-20": {"date": "2026-06-20", "title": "AI 研究日报（2026-06-20）", "html": "daily_ai_brief_2026-06-20.html", "md": "daily_ai_brief_2026-06-20.md"}, "2026-06-21": {"date": "2026-06-21", "title": "AI 研究日报（2026-06-21）", "html": "daily_ai_brief_2026-06-21.html", "md": "daily_ai_brief_2026-06-21.md"}, "2026-06-22": {"date": "2026-06-22", "title": "AI 研究日报（2026-06-22）", "html": "daily_ai_brief_2026-06-22.html", "md": "daily_ai_brief_2026-06-22.md"}, "2026-06-23": {"date": "2026-06-23", "title": "AI 研究日报（2026-06-23）", "html": "daily_ai_brief_2026-06-23.html", "md": "daily_ai_brief_2026-06-23.md"}, "2026-06-24": {"date": "2026-06-24", "title": "AI 研究日报（2026-06-24）", "html": "daily_ai_brief_2026-06-24.html", "md": "daily_ai_brief_2026-06-24.md"}, "2026-06-25": {"date": "2026-06-25", "title": "AI 研究日报（2026-06-25）", "html": "daily_ai_brief_2026-06-25.html", "md": "daily_ai_brief_2026-06-25.md"}, "2026-06-26": {"date": "2026-06-26", "title": "AI 研究日报（2026-06-26）", "html": "daily_ai_brief_2026-06-26.html", "md": "daily_ai_brief_2026-06-26.md"}, "2026-06-27": {"date": "2026-06-27", "title": "AI 研究日报（2026-06-27）", "html": "daily_ai_brief_2026-06-27.html", "md": "daily_ai_brief_2026-06-27.md"}, "2026-06-28": {"date": "2026-06-28", "title": "AI 研究日报（2026-06-28）", "html": "daily_ai_brief_2026-06-28.html", "md": "daily_ai_brief_2026-06-28.md"}, "2026-06-29": {"date": "2026-06-29", "title": "AI 研究日报（2026-06-29）", "html": "daily_ai_brief_2026-06-29.html", "md": "daily_ai_brief_2026-06-29.md"}, "2026-06-30": {"date": "2026-06-30", "title": "AI 研究日报（2026-06-30）", "html": "daily_ai_brief_2026-06-30.html", "md": "daily_ai_brief_2026-06-30.md"}, "2026-07-01": {"date": "2026-07-01", "title": "AI 研究日报（2026-07-01）", "html": "daily_ai_brief_2026-07-01.html", "md": "daily_ai_brief_2026-07-01.md"}, "2026-07-02": {"date": "2026-07-02", "title": "AI 研究日报（2026-07-02）", "html": "daily_ai_brief_2026-07-02.html", "md": "daily_ai_brief_2026-07-02.md"}, "2026-07-03": {"date": "2026-07-03", "title": "AI 研究日报（2026-07-03）", "html": "daily_ai_brief_2026-07-03.html", "md": "daily_ai_brief_2026-07-03.md"}, "2026-07-04": {"date": "2026-07-04", "title": "AI 研究日报（2026-07-04）", "html": "daily_ai_brief_2026-07-04.html", "md": "daily_ai_brief_2026-07-04.md"}, "2026-07-05": {"date": "2026-07-05", "title": "AI 研究日报（2026-07-05）", "html": "daily_ai_brief_2026-07-05.html", "md": "daily_ai_brief_2026-07-05.md"}, "2026-07-06": {"date": "2026-07-06", "title": "AI 研究日报（2026-07-06）", "html": "daily_ai_brief_2026-07-06.html", "md": "daily_ai_brief_2026-07-06.md"}, "2026-07-07": {"date": "2026-07-07", "title": "AI 研究日报（2026-07-07）", "html": "daily_ai_brief_2026-07-07.html", "md": "daily_ai_brief_2026-07-07.md"}, "2026-07-08": {"date": "2026-07-08", "title": "AI 研究日报（2026-07-08）", "html": "daily_ai_brief_2026-07-08.html", "md": "daily_ai_brief_2026-07-08.md"}, "2026-07-09": {"date": "2026-07-09", "title": "AI 研究日报（2026-07-09）", "html": "daily_ai_brief_2026-07-09.html", "md": "daily_ai_brief_2026-07-09.md"}, "2026-07-10": {"date": "2026-07-10", "title": "AI 研究日报（2026-07-10）", "html": "daily_ai_brief_2026-07-10.html", "md": "daily_ai_brief_2026-07-10.md"}, "2026-07-11": {"date": "2026-07-11", "title": "AI 研究日报（2026-07-11）", "html": "daily_ai_brief_2026-07-11.html", "md": "daily_ai_brief_2026-07-11.md"}};
     const dateButtons = Array.from(document.querySelectorAll('.day-cell.has-report'));
     const frame = document.getElementById('reportFrame');
     const selectedDate = document.getElementById('selectedDate');
