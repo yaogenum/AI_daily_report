@@ -6,9 +6,21 @@ LOG_DIR="$ROOT/logs"
 STATE_FILE="$LOG_DIR/daily_ai_healthcheck.state"
 HEALTH_LOG="$LOG_DIR/daily_ai_healthcheck.log"
 TODAY="$(date '+%Y-%m-%d')"
+CURRENT_HOUR="$(date '+%H')"
 TODAY_REPORT="$ROOT/report/daily_ai_brief_${TODAY}.md"
 BRIEF_ERR="$LOG_DIR/launchd_daily_ai_brief.err.log"
 RETRY_ERR="$LOG_DIR/launchd_daily_ai_email_retry.err.log"
+export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
+PYTHON_BIN="${PYTHON_BIN:-}"
+if [ -z "$PYTHON_BIN" ]; then
+  if [ -x "/usr/local/bin/python3" ]; then
+    PYTHON_BIN="/usr/local/bin/python3"
+  elif [ -x "/opt/homebrew/bin/python3" ]; then
+    PYTHON_BIN="/opt/homebrew/bin/python3"
+  else
+    PYTHON_BIN="/usr/bin/python3"
+  fi
+fi
 
 mkdir -p "$LOG_DIR"
 cd "$ROOT" || exit 1
@@ -103,6 +115,11 @@ old_brief_size="${old_brief_size:-$(file_size "$BRIEF_ERR")}"
 old_retry_size="${old_retry_size:-$(file_size "$RETRY_ERR")}"
 
 log "healthcheck start date=$TODAY"
+if [ "${DAILY_AI_HEALTHCHECK_FORCE:-0}" != "1" ] && [ "$CURRENT_HOUR" -lt 10 ]; then
+  log "healthcheck skip before 10:00"
+  exit 0
+fi
+
 new_errors="$(scan_new_errors "$BRIEF_ERR" "$old_brief_size")
 $(scan_new_errors "$RETRY_ERR" "$old_retry_size")"
 
@@ -110,10 +127,15 @@ status="ok"
 details=""
 
 if [ ! -f "$TODAY_REPORT" ]; then
+  if pgrep -f "daily_ai_brief_runner.py" >/dev/null 2>&1; then
+    status="main_running"
+    details="daily_ai_brief_runner.py is already running; skip repair"
+    log "$details"
+  else
   status="missing_report"
   details="today report missing before repair: $TODAY_REPORT"
   log "$details"
-  DAILY_AI_BRIEF_CATCHUP_DAYS=4 /usr/bin/python3 daily_ai_brief_runner.py >> "$HEALTH_LOG" 2>&1
+  DAILY_AI_BRIEF_CATCHUP_DAYS=4 "$PYTHON_BIN" daily_ai_brief_runner.py >> "$HEALTH_LOG" 2>&1
   repair_status=$?
   log "repair run exit=$repair_status"
   if [ ! -f "$TODAY_REPORT" ]; then
@@ -124,6 +146,7 @@ repair failed or report still missing: $TODAY_REPORT"
     status="repaired"
     details="$details
 repair generated report: $TODAY_REPORT"
+  fi
   fi
 fi
 
