@@ -323,6 +323,64 @@ def append_source_link(items: List[Dict[str, object]]) -> List[Dict[str, object]
     return out
 
 
+def build_ai_core_idea(item: Dict[str, object]) -> str:
+    title = str(item.get("title", "") or "").strip()
+    summary = str(item.get("summary", item.get("raw", item.get("snippet", ""))) or "").strip()
+    link = str(item.get("link", "") or "").strip()
+    text = f"{title} {summary} {link}".lower()
+
+    def result(positioning: str, problem: str) -> str:
+        return f"定位：{positioning}；解决问题：{problem}"
+
+    if any(k in text for k in ("gpt-red", "robustness", "self-improvement", "red team", "red-teaming")):
+        return result(
+            "模型自我改进与鲁棒性评测方法",
+            "让模型在复杂、对抗或分布外任务中持续发现弱点并提升稳定性，降低上线后的脆弱行为。",
+        )
+    if any(k in text for k in ("investment", "investments", "agentic era", "ai investments")):
+        return result(
+            "企业 AI 投资与治理框架",
+            "帮助组织判断 Agent 时代哪些投入能形成效率、风控和业务闭环，避免只买工具但无法衡量回报。",
+        )
+    if any(k in text for k in ("sales", "chatgpt work", "codex-for-work", "sales teams")):
+        return result(
+            "销售团队的 AI 工作流落地案例",
+            "把客户研究、材料生成、跟进记录和内部协作自动化，减少销售流程中的手工整理和信息断层。",
+        )
+    if any(k in text for k in ("microsoft 365 copilot", "preferred model", "copilot")):
+        return result(
+            "办公 Copilot 的默认模型能力升级",
+            "提升文档、会议、邮件和企业知识检索中的推理质量与执行一致性，降低员工切换模型的使用成本。",
+        )
+    if any(k in text for k in ("bio bug bounty", "biosecurity", "bug bounty", "biology")):
+        return result(
+            "生物安全方向的模型风险发现机制",
+            "通过外部赏金和专家测试提前发现生物相关能力边界，降低模型被误用或越权辅助的风险。",
+        )
+    if any(k in text for k in ("ambitious work", "partner for your most ambitious work", "chatgpt")):
+        return result(
+            "ChatGPT 作为复杂工作的协作入口",
+            "把研究、写作、分析和执行串成连续工作流，解决个人和团队在高复杂任务中的上下文断裂问题。",
+        )
+    if any(k in text for k in ("codex", "code", "coding", "migration", "developer")):
+        return result(
+            "代码 Agent 与工程自动化能力",
+            "辅助代码迁移、实现、审查和长期任务执行，减少大规模工程改造中的人工协调和重复操作。",
+        )
+    if any(k in text for k in ("agent", "agentic", "managed agents", "orchestration", "workflow")):
+        return result(
+            "Agent 编排与任务治理能力",
+            "让模型从单轮问答走向可跟踪、可恢复、可分工的任务执行，解决复杂任务缺少过程管理的问题。",
+        )
+    if title:
+        compact_title = re.sub(r"\s+", " ", title).strip()
+        return result(
+            "AI 产品、模型或行业动态",
+            f"围绕「{compact_title}」判断其面向的用户场景、能力变化和需要被解决的关键约束。",
+        )
+    return result("AI 行业动态", "补充当天值得关注的模型、产品或应用变化，作为后续深挖线索。")
+
+
 def _normalize_similarity_text(value: object) -> str:
     text = strip_html(str(value or "")).lower()
     text = unescape(text)
@@ -553,6 +611,251 @@ def _github_short_description(project: Dict[str, object], limit: int = 30) -> st
         text = "开源项目趋势观察"
     return text if len(text) <= limit else text[:limit].rstrip() + "…"
 
+
+def _github_project_raw_desc(project: Dict[str, object]) -> str:
+    text = str(
+        project.get("description")
+        or project.get("highlights")
+        or project.get("why")
+        or project.get("shortDescription")
+        or ""
+    ).strip()
+    if text.startswith("近7天增量满足阈值"):
+        text = ""
+    text = strip_html(unescape(text))
+    text = re.sub(r"https?://\S+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip(" -｜:：。.")
+    return text
+
+
+def _github_org_background(repo: str) -> str:
+    owner = (repo.split("/", 1)[0] if "/" in repo else repo).strip()
+    lower = owner.lower()
+    known = {
+        "microsoft": "知名企业/机构：Microsoft",
+        "cursor": "知名 AI 编程产品团队：Cursor",
+        "hkuds": "高校/研究机构：HKU DS",
+        "marp-team": "成熟开源组织：Marp",
+        "langchain-ai": "知名 Agent/LLM 框架团队：LangChain",
+        "ag-ui-protocol": "Agent UI 协议生态项目",
+        "iOfficeAI".lower(): "办公 AI 产品团队：iOfficeAI",
+        "CloakHQ".lower(): "浏览器/隐私工具产品团队：CloakHQ",
+        "Nutlope".lower(): "AI 原型/设计工具开发者生态",
+    }
+    if lower in known:
+        return known[lower]
+    if lower.endswith("ai") or "ai" in lower:
+        return f"AI 产品/开源团队：{owner}"
+    return f"独立开发者或开源团队：{owner}"
+
+
+def _github_project_profile(project: Dict[str, object]) -> Dict[str, str]:
+    repo = str(project.get("repo", "") or "")
+    name = repo.split("/")[-1].lower()
+    raw_desc = _github_project_raw_desc(project)
+    text = f"{repo} {name} {raw_desc}".lower()
+
+    def profile(positioning: str, problem: str, scenario: str) -> Dict[str, str]:
+        return {
+            "positioning": positioning,
+            "problem": problem,
+            "scenario": scenario,
+            "background": _github_org_background(repo),
+            "heat": f"{project.get('source', 'GitHub')}｜总星 {project.get('currentStars', '')}｜7天增量 {project.get('delta7d', '')}",
+        }
+
+    if "codegraph" in text:
+        return profile("代码库结构图谱/理解工具", "解决大代码库关系难查、上下文难定位的问题", "代码审查、迁移改造、Agent 读代码前的上下文构建")
+    if "openhuman" in text or "personal ai" in text:
+        return profile("本地优先个人 AI 记忆与 Agent 编排平台", "解决个人长期记忆、工具调用和多 Agent 协同割裂的问题", "个人 AI 助手、知识库、自动化任务和 Agent fleet 编排")
+    if "academic" in text or "research" in text:
+        return profile("学术研究技能/工作流集合", "解决论文检索、阅读、总结和研究步骤难标准化的问题", "学术调研、文献综述、研究型 Agent 流程模板")
+    if "agentmemory" in text or "memory" in text:
+        return profile("Agent 记忆层/上下文管理组件", "解决多轮任务中记忆丢失、上下文不可复用的问题", "长期 Agent、个人助手、项目知识沉淀和多会话任务")
+    if "officecli" in text or "office" in text:
+        return profile("Office 文档自动化 CLI", "解决文档、表格、演示稿处理依赖人工操作的问题", "办公自动化、批量文档处理、企业知识产出流水线")
+    if "cursor/plugins" in text or "cursor" in text:
+        return profile("AI IDE 插件生态", "解决开发者在 Cursor 内扩展工具链和工作流的问题", "编码助手插件、团队研发规范、IDE 内自动化")
+    if "cloakbrowser" in text or "browser" in text:
+        return profile("面向隐私/自动化的浏览器工具", "解决网页访问、隔离环境和自动化任务中的浏览器能力缺口", "网页 Agent、数据采集、账号隔离和安全浏览")
+    if "hallmark" in text or "ai-slop" in text or "design" in text:
+        return profile("反 AI 味设计/界面生成技能", "解决 AI 生成界面模板化、缺少审美和产品表达的问题", "前端原型、设计规范、AI 生成页面质量控制")
+    if "vibe-trading" in text or "trading" in text:
+        return profile("AI 交易/投研 Agent 实验框架", "解决金融场景中策略研究、信号跟踪和执行辅助难闭环的问题", "量化研究、投研助手、市场信号分析")
+    if "orca" in text:
+        return profile("AI Agent/工作流执行工具", "解决复杂任务拆解、执行和结果沉淀难稳定的问题", "自动化办公、研究任务、工程协作型 Agent")
+    if raw_desc:
+        desc = raw_desc if len(raw_desc) <= 42 else raw_desc[:42].rstrip() + "…"
+        return profile("快速上升开源项目", f"围绕 {desc} 解决特定开发或 AI 工作流问题", "需要结合 README 进一步验证适用场景")
+    return profile("快速上升开源项目", "解决某一类开发、Agent 或生产力工具链问题", "趋势观察、选型初筛、后续试用评测")
+
+
+def _github_deep_dive_recommendation(deep_dive: Dict[str, object]) -> str:
+    repo = str(deep_dive.get("repo", "") or "该项目")
+    stars = str(deep_dive.get("stars", "") or "N/A")
+    delta = str(deep_dive.get("delta7d", "") or "0")
+    profile = _github_project_profile(
+        {
+            "repo": repo,
+            "link": deep_dive.get("link", ""),
+            "currentStars": stars,
+            "delta7d": delta,
+            "description": deep_dive.get("problem", ""),
+            "source": "GitHub",
+        }
+    )
+    return (
+        f"推荐理由：{repo} 同时具备较高关注度（⭐ {stars}，7天增量 {delta}）、"
+        f"明确定位（{profile['positioning']}）和可落地场景（{profile['scenario']}），"
+        "适合作为今天优先拆解的开源样本。"
+    )
+
+
+def _wechat_account_summary(item: Dict[str, object]) -> str:
+    name = str(item.get("accountName", item.get("title", "")) or "")
+    account_id = str(item.get("accountId", "") or "")
+    key = f"{name} {account_id}".lower()
+    summaries = [
+        (("新智元", "ai_era"), "AI 前沿、模型进展与产业新闻速递"),
+        (("量子位", "qbitai"), "AI 技术突破、产品动态与行业观察"),
+        (("appso", "appsolution"), "AI 应用、效率工具与数字生活产品"),
+        (("机器之心", "almosthuman"), "机器学习论文、模型研究与工程进展"),
+        (("极客公园", "geekpark"), "科技公司、AI 产品与创业趋势报道"),
+        (("夕小瑶", "xixiaoyao"), "大模型、NLP 研究与技术科普"),
+        (("智东西", "zhidx"), "AI 芯片、智能硬件与产业链动态"),
+        (("脑极体", "unity007"), "AI 商业化、技术趋势与产业评论"),
+        (("硅星人", "si-planet"), "硅谷 AI 公司、产品和资本动态"),
+        (("数字生命", "rockhazix"), "数字人、AI 陪伴与智能体内容"),
+        (("甲子光年", "jazzyear"), "科技产业、AI 公司与商业化分析"),
+        (("z finance", "zfinance"), "AI 公司、资本市场与商业模式观察"),
+        (("deeptech", "deeptechchina"), "前沿科技、AI 研究与硬科技产业"),
+        (("ai科技评论", "aitechtalk"), "AI 学术、产业观点和技术评论"),
+        (("智能涌现", "aiemergence"), "大模型生态、Agent 与智能涌现趋势"),
+        (("暗涌", "waves36kr"), "AI 创业、投资和科技商业深度报道"),
+        (("datawhale",), "开源学习、数据科学与 AI 教程"),
+        (("科技新知", "kejixinzhi"), "AI 应用、科技商业和产品趋势"),
+        (("z potentials", "zpotentials"), "AI 创业者、产品和增长案例观察"),
+        (("ai大模型工场", "aigc"), "大模型应用、AIGC 工具和落地案例"),
+    ]
+    for keys, summary in summaries:
+        if any(k.lower() in key for k in keys):
+            return summary[:50]
+    return "AI 行业资讯、产品动态和技术趋势观察"
+
+
+def collect_llm_model_releases() -> List[Dict[str, str]]:
+    """Latest model release/pricing watchlist.
+
+    Prices are normalized to the public list price per 1M input/output tokens.
+    For CNY prices, the original currency is preserved to avoid implying a live FX rate.
+    """
+    return [
+        {
+            "company": "DeepSeek",
+            "model": "DeepSeek-V4-Pro",
+            "version": "deepseek-v4-pro",
+            "input_per_million": "$0.435",
+            "output_per_million": "$0.87",
+            "overall_per_million": "$1.305",
+            "summary": "1M上下文，强化推理、工具调用与长输出",
+            "source": "https://api-docs.deepseek.com/quick_start/pricing/",
+        },
+        {
+            "company": "Anthropic",
+            "model": "Claude Fable 5",
+            "version": "Claude Fable 5",
+            "input_per_million": "$10.00",
+            "output_per_million": "$50.00",
+            "overall_per_million": "$60.00",
+            "summary": "旗舰智能体模型，面向长程代理与复杂任务",
+            "source": "https://platform.claude.com/docs/en/about-claude/pricing",
+        },
+        {
+            "company": "OpenAI",
+            "model": "GPT-5.6 Sol",
+            "version": "gpt-5.6-sol",
+            "input_per_million": "$5.00",
+            "output_per_million": "$30.00",
+            "overall_per_million": "$35.00",
+            "summary": "强化复杂多步推理，适合高要求Agent工作",
+            "source": "https://openai.com/api/pricing/",
+        },
+        {
+            "company": "Google",
+            "model": "Gemini 2.5 Pro",
+            "version": "gemini-2.5-pro",
+            "input_per_million": "$1.25 / $2.50",
+            "output_per_million": "$10.00 / $15.00",
+            "overall_per_million": "$11.25 / $17.50",
+            "summary": "编码与复杂推理强，按上下文长度分档计费",
+            "source": "https://ai.google.dev/gemini-api/docs/pricing",
+        },
+        {
+            "company": "Alibaba",
+            "model": "Qwen3.7-Max",
+            "version": "qwen3.7-max",
+            "input_per_million": "$2.50",
+            "output_per_million": "$7.50",
+            "overall_per_million": "$10.00",
+            "summary": "千问旗舰，强化多模态、办公与Agent生产力",
+            "source": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+        },
+        {
+            "company": "Zhipu GLM",
+            "model": "GLM-5.2",
+            "version": "glm-5.2",
+            "input_per_million": "¥8.00",
+            "output_per_million": "¥28.00",
+            "overall_per_million": "¥36.00",
+            "summary": "1M无损上下文，强化长程Coding Agent交付",
+            "source": "https://docs.bigmodel.cn/cn/guide/models/text/glm-5.2",
+        },
+        {
+            "company": "Moonshot Kimi",
+            "model": "Kimi K3",
+            "version": "kimi-k3",
+            "input_per_million": "$3.00",
+            "output_per_million": "$15.00",
+            "overall_per_million": "$18.00",
+            "summary": "1M上下文旗舰，强化长程编程与知识工作",
+            "source": "https://platform.kimi.com/docs/pricing/chat-k3",
+        },
+    ]
+
+
+def _build_structured_diff(report: Dict) -> Dict[str, List[str]]:
+    raw = str(report.get("diffSummary", "") or "")
+    tokens = [x.strip(" `，,。") for x in re.split(r"[、,，]", raw) if x.strip()]
+    lowered = {t.lower() for t in tokens}
+    changes: List[str] = []
+    industry: List[str] = []
+    signals: List[str] = []
+
+    if {"anthropic", "code", "migrations", "cowork"} & lowered:
+        changes.append("Claude/Anthropic 方向新增代码迁移、Cowork、长程协作相关内容。")
+        industry.append("AI 编程正在从单点补全转向大规模代码迁移和团队协作型 Agent。")
+    if {"hkuds", "vibe-trading", "orca", "stablyai"} & lowered:
+        changes.append("GitHub 新增 Vibe-Trading、Orca、StablyAI 等高增长项目线索。")
+        industry.append("开源热点从通用 Agent 扩展到金融交易、稳定执行、垂直工作流。")
+    if {"large-scale", "runs"} & lowered:
+        signals.append("长程任务、批量执行和可恢复运行成为本期新增关键词。")
+    if any(str(x.get("time", "")).startswith(report.get("date", "")) for x in report.get("brokerReports", [])):
+        industry.append("券商侧继续关注 AI ASIC、国产算力、AI 投研权限边界和应用落地。")
+    if report.get("llmModelReleases"):
+        industry.append("模型发布竞争进入“能力+价格”并行阶段，长上下文与Coding Agent成为主线。")
+
+    if not changes:
+        changes.append("本期与近 7 天内容保持相关，新增差异主要体现在关键词和项目组合变化。")
+    if not industry:
+        industry.append("行业主线仍围绕 Agent 工程化、模型能力升级和企业落地。")
+    if not signals:
+        focus_terms = [t for t in tokens if t and not re.match(r"\d{4}-\d{2}-\d{2}", t)]
+        if focus_terms:
+            signals.append("新增关键词：" + "、".join(focus_terms[:8]))
+        else:
+            signals.append("无明显新增关键词，保留近 7 天关联脉络。")
+    return {"changes": changes[:4], "industry": industry[:4], "signals": signals[:4]}
+
 EMAIL_RECIPIENT = _read_env_first("DAILY_AI_BRIEF_EMAIL_TO", "EMAIL_TO_ADDRESSES", "EMAIL_TO")
 EMAIL_SMTP_HOST = _read_env_first("DAILY_AI_BRIEF_SMTP_HOST", "SMTP_HOST", "EMAIL_SMTP_HOST", default="smtp.gmail.com")
 EMAIL_SMTP_PORT = int(_read_env_first("DAILY_AI_BRIEF_SMTP_PORT", "SMTP_PORT", "EMAIL_SMTP_PORT", default="587"))
@@ -712,7 +1015,7 @@ def fetch_url(url: str, timeout: int = 12) -> str:
         # request already timed out or failed, skip the curl fallback so one bad
         # mirror does not stall the whole daily run.
         lowered_url = url.lower()
-        if "nitter." in lowered_url or "rsshub." in lowered_url:
+        if "nitter." in lowered_url or "rsshub." in lowered_url or "raw.githubusercontent.com" in lowered_url:
             return f"__ERROR__:{exc}"
         fallback = _curl_fetch_url(url, timeout=timeout)
         if not fallback.startswith("__ERROR__"):
@@ -755,19 +1058,20 @@ def _decode_response_bytes(raw: bytes, content_type: str = "") -> str:
 
 
 def _curl_fetch_url(url: str, timeout: int = 12) -> str:
+    effective_timeout = max(1, min(timeout, 4))
     cmd = [
         "curl",
         "-LksS",
         "--connect-timeout",
-        str(max(1, min(timeout, 5))),
+        str(max(1, min(effective_timeout, 3))),
         "--max-time",
-        str(max(1, timeout)),
+        str(effective_timeout),
         "-A",
         "Mozilla/5.0 (X11; Linux x86_64)",
         url,
     ]
     try:
-        completed = subprocess.run(cmd, capture_output=True, timeout=max(2, timeout + 2), check=False)
+        completed = subprocess.run(cmd, capture_output=True, timeout=effective_timeout + 1, check=False)
     except Exception as exc:
         return f"__ERROR__:{exc}"
     if completed.returncode != 0:
@@ -825,7 +1129,7 @@ def _collect_openai_search(query: str) -> List[Dict[str, object]]:
         return []
     payload = {
         "model": OPENAI_SEARCH_MODEL,
-        "input": f"请只返回近期与AI研究相关的2-3条高可信新闻标题与简短结论：{query}",
+        "input_per_million": f"请只返回近期与AI研究相关的2-3条高可信新闻标题与简短结论：{query}",
         "tools": [{"type": "web_search_preview"}],
         "max_output_tokens": 1000,
         "store": False,
@@ -1365,7 +1669,7 @@ def _translate_snippet(text: str, source: str = "") -> str:
         return ""
     payload = {
         "model": OPENAI_SEARCH_MODEL,
-        "input": f"请将以下内容翻译为中文：\n\n{source}\n{text}".strip(),
+        "input_per_million": f"请将以下内容翻译为中文：\n\n{source}\n{text}".strip(),
         "max_output_tokens": 1200,
         "store": False,
     }
@@ -2310,7 +2614,7 @@ def fetch_repo_meta(repo: str) -> Dict[str, object]:
     if not repo_clean:
         return {}
     api_url = f"https://api.github.com/repos/{repo_clean}"
-    api_text = fetch_url(api_url)
+    api_text = fetch_url(api_url, timeout=4)
     if api_text.startswith("__ERROR__"):
         return {
             "repo": repo_clean,
@@ -2464,12 +2768,12 @@ def _safe_int(value: object, default: int = 0) -> int:
 
 
 def _fetch_github_readme_text(repo: str) -> str:
-    candidate_paths = ["README.md", "readme.md", "README.rst", "readme.rst"]
-    branches = ["main", "master", "develop", "dev"]
+    candidate_paths = ["README.md", "readme.md"]
+    branches = ["main", "master"]
     repo = (repo or "").strip()
     for branch in branches:
         for path in candidate_paths:
-            text = fetch_url(f"https://raw.githubusercontent.com/{repo}/{branch}/{path}")
+            text = fetch_url(f"https://raw.githubusercontent.com/{repo}/{branch}/{path}", timeout=3)
             if text.startswith("__ERROR__"):
                 continue
             if text and len(text) > 180:
@@ -3551,6 +3855,7 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
     broker_reports = collect_broker_ai_reports()
     if not broker_reports:
         broker_reports = []
+    llm_model_releases = collect_llm_model_releases()
 
     aiHighlights = []
     if not (openai or anthropic or infoq or frontier or ai_search_updates or priority_raw):
@@ -3569,8 +3874,8 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
                     "source": s["source"],
                     "link": s["link"],
                     "time": s.get("time", ""),
-                    "coreIdea": "关注该方向对任务可观察性与可执行性的影响。",
-                    "value": "可用于评估代理链路的可治理性和交付可靠性。",
+                    "coreIdea": build_ai_core_idea(s),
+                    "value": "按定位和待解决问题判断是否值得进入后续深挖。",
                 }
             )
 
@@ -3584,7 +3889,7 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
                         "source": s["source"],
                         "link": s["link"],
                         "time": s.get("time", ""),
-                        "coreIdea": "AI检索补充：支持快速发现最新行业动态与研究线索。",
+                        "coreIdea": build_ai_core_idea(s),
                         "value": "与 AI 快讯形成交叉验证与补全。",
                     }
                 )
@@ -3632,6 +3937,7 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
     source_channels.append("AIGCRank 微信AI公告号")
     source_channels.append("Twitter 美国科技公司")
     source_channels.append("新浪研报（10大券商）")
+    source_channels.append("LLM 模型发布/价格")
 
     report = {
         "date": date_str,
@@ -3647,6 +3953,7 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
         "wechatTop20": wechat_top20,
         "twitterUpdates": twitter_updates,
         "brokerReports": broker_reports,
+        "llmModelReleases": llm_model_releases,
         "topicSummary": topic_summary,
         "skillTop": skill_top,
         "focusedSignals": focused,
@@ -3752,10 +4059,9 @@ def format_markdown(report: Dict) -> str:
     for p in report.get("trendProjects", []):
         repo = p.get("repo", "N/A")
         link = p.get("link", github_repo_link(repo))
-        src = p.get("source", "GitHub")
-        short_desc = _github_short_description(p)
+        profile = _github_project_profile(p)
         lines.append(
-            f"- [{repo}]({link})（{src}）：{short_desc}；总星 `{p.get('currentStars')}`，7天增量 `{p.get('delta7d')}`"
+            f"- [{repo}]({link})：{profile['positioning']}；解决：{profile['problem']}；热度：总星 `{p.get('currentStars')}`，7天增量 `{p.get('delta7d')}`"
         )
     lines.append("")
     lines.extend(["## 今日高频主题（自动提取）", ""])
@@ -3865,12 +4171,12 @@ def format_html(report: Dict) -> str:
 
     trend_html = []
     for p in report.get("trendProjects", []):
-        short_desc = _github_short_description(p)
+        profile = _github_project_profile(p)
         trend_html.append(
             "<li><strong><a href='"
             f"{escape(p.get('link', github_repo_link(p.get('repo', ''))))}'>"
-            f"{escape(p.get('repo', ''))}</a></strong>（{escape(str(p.get('source', 'GitHub')))}）："
-            f"{escape(short_desc)}；总星 "
+            f"{escape(p.get('repo', ''))}</a></strong>："
+            f"{escape(profile['positioning'])}；解决：{escape(profile['problem'])}；总星 "
             f"<code>{escape(str(p.get('currentStars', '')))}</code>，7 天增量 "
             f"<code>{escape(str(p.get('delta7d', '')))}</code></li>"
         )
@@ -4043,11 +4349,24 @@ def format_html(report: Dict) -> str:
 
     if merged_priority_items:
         summary_points: List[str] = []
+        generic_tech_labels = {"Agent", "Workflow", "Memory", "Tools", "API", "Policy"}
+        generic_tech_terms = {x.lower() for x in generic_tech_labels}
+
+        def _is_generic_tech_point(point: str) -> bool:
+            text = point.strip()
+            low = text.lower()
+            if low in generic_tech_terms:
+                return True
+            for label in generic_tech_labels:
+                if text.startswith(f"{label}（置信度："):
+                    return True
+            return len(text) <= 10 and low in {"agent", "workflow", "memory", "tools", "api", "policy"}
+
         signal_points = _build_architecture_signal_map(merged_priority_items)
         architecture_trace_points = [
             f"{label}（置信度：{_confidence_label(score)}）"
             for label, score in signal_points
-            if label and score > 0
+            if label and score >= 2 and label not in generic_tech_labels
         ]
         summary_points.extend(architecture_trace_points)
 
@@ -4056,36 +4375,27 @@ def format_html(report: Dict) -> str:
             summary = str(item.get("summary", "")).strip()
             text = f"{title} {summary}"
             for clue in _extract_highlights(text):
-                if clue not in summary_points:
+                if clue not in summary_points and not _is_generic_tech_point(clue):
                     summary_points.append(clue)
 
         # 去重并控制条目长度，保留核心信息
         deduped_points: List[str] = []
         for p in summary_points:
-            if p and p not in deduped_points:
+            if p and p not in deduped_points and not _is_generic_tech_point(p):
                 deduped_points.append(p)
-        summary_points = deduped_points[:12]
+        summary_points = deduped_points[:8]
 
-        tech_points = "".join(
-            [f"<li>{escape(_shorten(item))}</li>" for item in summary_points]
-            if summary_points
-            else ["<li>当前区间未提取到可判定的关键技术点，仅保留原文摘要供追溯。</li>"]
-        )
-
-        tech_overview_blocks.append(
-            "<section class='card tech-card'>"
-            "<h3>Claude + OpenAI 技术概要</h3>"
-            "<div class='card-inner'>"
-            "<p>技术要点（按置信度与架构线索优先）</p>"
-            f"<ul>{tech_points}</ul>"
-            "</div>"
-            "</section>"
-        )
-
-    if not tech_overview_blocks:
-        tech_overview_blocks.append(
-            "<section class='card tech-card'><h3>技术概要</h3><p>当前没有可用于技术归纳的 Claude/OpenAI 官方新内容。</p></section>"
-        )
+        if summary_points:
+            tech_points = "".join([f"<li>{escape(_shorten(item))}</li>" for item in summary_points])
+            tech_overview_blocks.append(
+                "<section class='card tech-card'>"
+                "<h3>Claude + OpenAI 技术概要</h3>"
+                "<div class='card-inner'>"
+                "<p>技术要点（仅展示可复用的框架 / SKILL / 能力线索）</p>"
+                f"<ul>{tech_points}</ul>"
+                "</div>"
+                "</section>"
+            )
 
     panels = {
         "priority": "".join(priority_html),
@@ -4285,6 +4595,7 @@ def format_markdown(report: Dict) -> str:
     wechat_top20 = report.get("wechatTop20", [])
     twitter_updates = report.get("twitterUpdates", [])
     broker_reports = report.get("brokerReports", [])
+    llm_models = report.get("llmModelReleases", [])
     suggestions = report.get("suggestions", [])
     deep_dive = report.get("githubDeepDive")
     ag = report.get("ag_ui", {})
@@ -4295,6 +4606,43 @@ def format_markdown(report: Dict) -> str:
         f"- 数据源：{' / '.join(source_list) if source_list else 'OpenAI / Anthropic / INFOQ / GitHub / AG-UI / 微信 / Twitter / 券商研报'}",
         "",
     ]
+
+    if isinstance(deep_dive, dict) and deep_dive.get("repo"):
+        lines.extend(["## GitHub 高增长项目深度解读", ""])
+        lines.append(
+            f"- 仓库：[{deep_dive.get('repo', '')}]({deep_dive.get('link', github_repo_link(deep_dive.get('repo', '')) )})"
+        )
+        lines.append(f"- {_github_deep_dive_recommendation(deep_dive)}")
+        lines.append(f"- 关注指标：⭐ {deep_dive.get('stars', 0)} / 7天增量 {deep_dive.get('delta7d', 0)}")
+        if deep_dive.get("problem"):
+            lines.append(f"- 解决问题：{deep_dive.get('problem')}")
+        if deep_dive.get("solution"):
+            lines.append(f"- 解决思路：{deep_dive.get('solution')}")
+        if deep_dive.get("architecture"):
+            lines.append(f"- 架构设计：{deep_dive.get('architecture')}")
+        lines.append("")
+
+    if llm_models:
+        lines.extend(["## LLM 模型发布与价格", ""])
+        llm_table = _render_markdown_table(
+            ["公司", "最新模型", "版本", "输入/百万token", "输出/百万token", "整体/百万token", "升级概述", "来源"],
+            [
+                [
+                    item.get("company", ""),
+                    item.get("model", ""),
+                    item.get("version", ""),
+                    item.get("input_per_million", ""),
+                    item.get("output_per_million", ""),
+                    item.get("overall_per_million", ""),
+                    item.get("summary", ""),
+                    item.get("source", ""),
+                ]
+                for item in llm_models
+            ],
+        )
+        if llm_table:
+            lines.extend(llm_table)
+            lines.append("")
 
     if priority_blocks:
         lines.append("## [优先] Claude / OpenAI Research 近一周官方更新")
@@ -4382,23 +4730,22 @@ def format_markdown(report: Dict) -> str:
         for p in trend_projects:
             repo = p.get("repo", "N/A")
             link = p.get("link", github_repo_link(repo))
-            src = p.get("source", "GitHub")
-            short_desc = _github_short_description(p)
+            profile = _github_project_profile(p)
             lines.append(
-                f"- [{repo}]({link})（{src}）：{short_desc}；总星 `{p.get('currentStars')}`，7天增量 `{p.get('delta7d')}`"
+                f"- [{repo}]({link})：{profile['positioning']}；解决：{profile['problem']}；热度：总星 `{p.get('currentStars')}`，7天增量 `{p.get('delta7d')}`"
             )
         lines.append("")
         trend_table = _render_markdown_table(
-            ["排名", "仓库", "概括描述", "总星", "7天增量", "来源", "规则"],
+            ["排名", "仓库", "定位", "解决问题", "应用场景", "背景", "热度"],
             [
                 [
                     p.get("rank", idx),
                     f"[{p.get('repo', 'N/A')}]({p.get('link', github_repo_link(p.get('repo', '')) )})",
-                    _github_short_description(p),
-                    p.get("currentStars", ""),
-                    p.get("delta7d", ""),
-                    p.get("source", "GitHub"),
-                    p.get("rule", "星标与增速策略已适配"),
+                    _github_project_profile(p)["positioning"],
+                    _github_project_profile(p)["problem"],
+                    _github_project_profile(p)["scenario"],
+                    _github_project_profile(p)["background"],
+                    _github_project_profile(p)["heat"],
                 ]
                 for idx, p in enumerate(trend_projects, start=1)
             ],
@@ -4418,20 +4765,14 @@ def format_markdown(report: Dict) -> str:
 
     if wechat_top20:
         lines.extend(["## WeChat Top20 AI 公告号", ""])
-        for item in wechat_top20:
-            title = item.get("title", "")
-            if not title:
-                continue
-            lines.append(f"- {title}（{item.get('raw', '')}）")
-            if item.get("link"):
-                lines.append(f"  - 参考：{item.get('link')}")
         wechat_table = _render_markdown_table(
-            ["排名", "公众号", "ID", "新榜指数", "平均阅读数", "链接"],
+            ["排名", "公众号", "ID", "内容概述", "新榜指数", "平均阅读数", "链接"],
             [
                 [
                     item.get("rank", idx),
                     item.get("accountName", item.get("title", "")),
                     item.get("accountId", ""),
+                    _wechat_account_summary(item),
                     item.get("score", ""),
                     item.get("avgReads", ""),
                     item.get("link", ""),
@@ -4440,8 +4781,6 @@ def format_markdown(report: Dict) -> str:
             ],
         )
         if wechat_table:
-            lines.append("")
-            lines.append("### WeChat Top20 表")
             lines.extend(wechat_table)
 
     if twitter_updates:
@@ -4470,20 +4809,8 @@ def format_markdown(report: Dict) -> str:
 
     if broker_reports:
         lines.extend(["", "## 券商 AI 研报（10 大）", ""])
-        by_broker = {}
-        for item in broker_reports:
-            by_broker.setdefault(item.get("broker", "未知券商"), []).append(item)
-        for broker, items in by_broker.items():
-            lines.append(f"### {broker}")
-            for item in items[:3]:
-                title = item.get("title", "")
-                if not title:
-                    continue
-                lines.append(f"- {title}")
-                if item.get("link"):
-                    lines.append(f"  - 链接：{item.get('link')}")
         broker_table = _render_markdown_table(
-            ["券商", "日期", "分类", "标题", "分析师"],
+            ["券商", "日期", "分类", "标题", "分析师", "链接"],
             [
                 [
                     item.get("broker", ""),
@@ -4491,16 +4818,15 @@ def format_markdown(report: Dict) -> str:
                     item.get("category", ""),
                     item.get("title", ""),
                     item.get("analyst", ""),
+                    item.get("link", ""),
                 ]
                 for item in broker_reports[:12]
             ],
         )
         if broker_table:
-            lines.append("")
-            lines.append("### 券商研报表")
             lines.extend(broker_table)
 
-    if isinstance(deep_dive, dict) and deep_dive.get("repo"):
+    if False and isinstance(deep_dive, dict) and deep_dive.get("repo"):
         lines.extend(["", "## GitHub 高增长项目深度解读", ""])
         lines.append(
             f"- 仓库：[{deep_dive.get('repo', '')}]({deep_dive.get('link', github_repo_link(deep_dive.get('repo', '')) )})"
@@ -4514,10 +4840,17 @@ def format_markdown(report: Dict) -> str:
             lines.append(f"- 架构设计：{deep_dive.get('architecture')}")
 
     record_policy = report.get("record_policy")
+    diff_detail = _build_structured_diff(report)
+    lines.extend(["", "## 合并与差异", "", "### 发生了什么"])
+    for item in diff_detail.get("changes", []):
+        lines.append(f"- {item}")
+    lines.extend(["", "### 业内含义"])
+    for item in diff_detail.get("industry", []):
+        lines.append(f"- {item}")
+    lines.extend(["", "### 新增信号"])
+    for item in diff_detail.get("signals", []):
+        lines.append(f"- {item}")
     if isinstance(record_policy, dict):
-        lines.append("")
-        lines.append("## 合并与差异")
-        lines.append(f"- 今日差异：{report.get('diffSummary', '')}")
         lines.append(
             "- 保留策略：最近{retain}条；清理旧记录 {removed_old} 条；当前保留 {remaining_records} 条；7天关联窗口 {merged_within_7d} 天；今日是否合并：{merged}。".format(
                 retain=record_policy.get("retain_last", MAX_RECORDS),
@@ -4527,19 +4860,6 @@ def format_markdown(report: Dict) -> str:
                 merged="是" if record_policy.get("merged", False) else "否",
             )
         )
-    else:
-        lines.extend([
-            "",
-            "## 合并与差异",
-            f"- 今日差异：{report.get('diffSummary', '')}",
-            "",
-            str(record_policy or "保留策略：最近14条，自动清理旧记录。"),
-        ])
-
-    if suggestions:
-        lines.extend(["", "## 执行建议", ""])
-        for suggestion in suggestions:
-            lines.append(f"- {suggestion}")
 
     lines.append("")
     return "\n".join(lines)
@@ -4556,6 +4876,7 @@ def format_html(report: Dict) -> str:
     wechat_top20 = report.get("wechatTop20", [])
     twitter_updates = report.get("twitterUpdates", [])
     broker_reports = report.get("brokerReports", [])
+    llm_models = report.get("llmModelReleases", [])
     topic_summary = report.get("topicSummary", [])
     focused_blocks = report.get("focusedSignals", [])
     suggestions = report.get("suggestions", [])
@@ -4661,11 +4982,24 @@ def format_html(report: Dict) -> str:
 
     if merged_priority_items:
         summary_points: List[str] = []
+        generic_tech_labels = {"Agent", "Workflow", "Memory", "Tools", "API", "Policy"}
+        generic_tech_terms = {x.lower() for x in generic_tech_labels}
+
+        def _is_generic_tech_point(point: str) -> bool:
+            text = point.strip()
+            low = text.lower()
+            if low in generic_tech_terms:
+                return True
+            for label in generic_tech_labels:
+                if text.startswith(f"{label}（置信度："):
+                    return True
+            return len(text) <= 10 and low in {"agent", "workflow", "memory", "tools", "api", "policy"}
+
         signal_points = _build_architecture_signal_map(merged_priority_items)
         architecture_trace_points = [
             f"{label}（置信度：{_confidence_label(score)}）"
             for label, score in signal_points
-            if label and score > 0
+            if label and score >= 2 and label not in generic_tech_labels
         ]
         summary_points.extend(architecture_trace_points)
 
@@ -4674,29 +5008,26 @@ def format_html(report: Dict) -> str:
             summary = str(item.get("summary", "")).strip()
             text = f"{title} {summary}"
             for clue in _extract_highlights(text):
-                if clue not in summary_points:
+                if clue not in summary_points and not _is_generic_tech_point(clue):
                     summary_points.append(clue)
 
         deduped_points: List[str] = []
         for point in summary_points:
-            if point and point not in deduped_points:
+            if point and point not in deduped_points and not _is_generic_tech_point(point):
                 deduped_points.append(point)
-        summary_points = deduped_points[:12]
+        summary_points = deduped_points[:8]
 
-        tech_points = "".join(
-            [f"<li>{escape(_shorten(point))}</li>" for point in summary_points]
-            if summary_points
-            else ["<li>当前区间未提取到可判定的关键技术点。</li>"]
-        )
-        tech_overview_blocks.append(
-            "<section class='card tech-card'>"
-            "<h3>Claude + OpenAI 技术概要</h3>"
-            "<div class='card-inner'>"
-            "<p>技术要点（按置信度与架构线索优先）</p>"
-            f"<ul>{tech_points}</ul>"
-            "</div>"
-            "</section>"
-        )
+        if summary_points:
+            tech_points = "".join([f"<li>{escape(_shorten(point))}</li>" for point in summary_points])
+            tech_overview_blocks.append(
+                "<section class='card tech-card'>"
+                "<h3>Claude + OpenAI 技术概要</h3>"
+                "<div class='card-inner'>"
+                "<p>技术要点（仅展示可复用的框架 / SKILL / 能力线索）</p>"
+                f"<ul>{tech_points}</ul>"
+                "</div>"
+                "</section>"
+            )
 
     priority_html = []
     for block in priority_blocks:
@@ -4739,45 +5070,40 @@ def format_html(report: Dict) -> str:
 
     trend_list = []
     for p in trend_projects:
-        short_desc = _github_short_description(p)
+        profile = _github_project_profile(p)
         trend_list.append(
             "<li><strong><a href='"
             f"{escape(p.get('link', github_repo_link(p.get('repo', ''))))}'>"
-            f"{escape(p.get('repo', ''))}</a></strong>（{escape(str(p.get('source', 'GitHub')))}）："
-            f"{escape(short_desc)}；总星 "
+            f"{escape(p.get('repo', ''))}</a></strong>："
+            f"{escape(profile['positioning'])}；解决：{escape(profile['problem'])}；总星 "
             f"<code>{escape(str(p.get('currentStars', '')))}</code>，7 天增量 "
             f"<code>{escape(str(p.get('delta7d', '')))}</code></li>"
         )
     trend_table_html = _render_html_table(
-        ["排名", "仓库", "概括描述", "总星", "7天增量", "来源", "规则"],
+        ["排名", "仓库", "定位", "解决问题", "应用场景", "背景", "热度"],
         [
             [
                 escape(str(p.get("rank", idx))),
                 f"<a href='{escape(p.get('link', github_repo_link(p.get('repo', ''))))}'>{escape(p.get('repo', ''))}</a>",
-                escape(_github_short_description(p)),
-                escape(str(p.get("currentStars", ""))),
-                escape(str(p.get("delta7d", ""))),
-                escape(str(p.get("source", "GitHub"))),
-                escape(str(p.get("rule", "星标与增速策略已适配"))),
+                escape(_github_project_profile(p)["positioning"]),
+                escape(_github_project_profile(p)["problem"]),
+                escape(_github_project_profile(p)["scenario"]),
+                escape(_github_project_profile(p)["background"]),
+                escape(_github_project_profile(p)["heat"]),
             ]
             for idx, p in enumerate(trend_projects, start=1)
         ],
     )
 
-    wechat_html = []
-    if wechat_top20:
-        for item in wechat_top20:
-            title = escape(item.get("title", ""))
-            raw = escape(item.get("raw", ""))
-            if title:
-                wechat_html.append(f"<li>{title} - {raw}</li>")
+    has_wechat_table = bool(wechat_top20)
     wechat_table_html = _render_html_table(
-        ["排名", "公众号", "ID", "新榜指数", "平均阅读数", "链接"],
+        ["排名", "公众号", "ID", "内容概述", "新榜指数", "平均阅读数", "链接"],
         [
             [
                 escape(str(item.get("rank", idx))),
                 escape(str(item.get("accountName", item.get("title", "")))),
                 escape(str(item.get("accountId", ""))),
+                escape(_wechat_account_summary(item)),
                 escape(str(item.get("score", ""))),
                 escape(str(item.get("avgReads", ""))),
                 f"<a href='{escape(str(item.get('link', '')))}'>{escape(str(item.get('link', '')))}</a>" if item.get("link") else "",
@@ -4821,7 +5147,7 @@ def format_html(report: Dict) -> str:
                 broker_html.append("</li>")
             broker_html.append("</ul></li>")
     broker_table_html = _render_html_table(
-        ["券商", "日期", "分类", "标题", "分析师"],
+        ["券商", "日期", "分类", "标题", "分析师", "链接"],
         [
             [
                 escape(str(item.get("broker", ""))),
@@ -4829,8 +5155,25 @@ def format_html(report: Dict) -> str:
                 escape(str(item.get("category", ""))),
                 escape(str(item.get("title", ""))),
                 escape(str(item.get("analyst", ""))),
+                f"<a href='{escape(str(item.get('link', '')))}'>{escape(str(item.get('link', '')))}</a>" if item.get("link") else "",
             ]
             for item in broker_reports[:12]
+        ],
+    )
+    llm_table_html = _render_html_table(
+        ["公司", "最新模型", "版本", "输入/百万token", "输出/百万token", "整体/百万token", "升级概述", "来源"],
+        [
+            [
+                escape(str(item.get("company", ""))),
+                escape(str(item.get("model", ""))),
+                escape(str(item.get("version", ""))),
+                escape(str(item.get("input_per_million", ""))),
+                escape(str(item.get("output_per_million", ""))),
+                escape(str(item.get("overall_per_million", ""))),
+                escape(str(item.get("summary", ""))),
+                f"<a href='{escape(str(item.get('source', '')))}'>{escape(str(item.get('source', '')))}</a>" if item.get("source") else "",
+            ]
+            for item in llm_models
         ],
     )
 
@@ -4883,6 +5226,20 @@ def format_html(report: Dict) -> str:
     topic_list = "".join([f"<li>{escape(str(x.get('term', '')))}（{escape(str(x.get('count', 0)))}）</li>" for x in topic_summary])
 
     sections = []
+    if deep_dive and isinstance(deep_dive, dict) and deep_dive.get("repo"):
+        sections.append(
+            "<section class='card'>"
+            "<h2 class='main-title'>GitHub 高增长项目深度解读</h2>"
+            f"<h3><a href='{escape(deep_dive.get('link', github_repo_link(deep_dive.get('repo', ''))))}'>{escape(deep_dive.get('repo', ''))}</a></h3>"
+            f"<p><strong>{escape(_github_deep_dive_recommendation(deep_dive))}</strong></p>"
+            f"<p>关注指标：⭐ {escape(str(deep_dive.get('stars', 0)))} / 7天增量 {escape(str(deep_dive.get('delta7d', 0)))}</p>"
+            f"<p><strong>解决问题：</strong>{escape(str(deep_dive.get('problem', '')))}</p>"
+            f"<p><strong>解决思路：</strong>{escape(str(deep_dive.get('solution', '')))}</p>"
+            f"<p><strong>架构设计：</strong>{escape(str(deep_dive.get('architecture', '')))}</p>"
+            "</section>"
+        )
+    if llm_models:
+        sections.append("<section class='card'><h2 class='main-title'>LLM 模型发布与价格</h2>" + llm_table_html + "</section>")
     if tech_overview_blocks:
         sections.append(
             "<section class='card tech-wrap'><h2 class='main-title'>技术概要</h2>"
@@ -4925,7 +5282,7 @@ def format_html(report: Dict) -> str:
         )
     if topic_list:
         sections.append(f"<section class='card'><h2 class='main-title'>今日高频主题</h2><ul>{topic_list}</ul></section>")
-    if deep_dive and isinstance(deep_dive, dict) and deep_dive.get("repo"):
+    if False and deep_dive and isinstance(deep_dive, dict) and deep_dive.get("repo"):
         sections.append(
             "<section class='card'>"
             "<h2 class='main-title'>GitHub 高增长项目深度解读</h2>"
@@ -4936,14 +5293,12 @@ def format_html(report: Dict) -> str:
             f"<p><strong>架构设计：</strong>{escape(str(deep_dive.get('architecture', '')))}</p>"
             "</section>"
         )
-    if wechat_html:
-        sections.append("<section class='card'><h2 class='main-title'>WeChat Top20 AI 公告号</h2><ul>" + "".join(wechat_html) + "</ul>" + wechat_table_html + "</section>")
+    if has_wechat_table:
+        sections.append("<section class='card'><h2 class='main-title'>WeChat Top20 AI 公告号</h2>" + wechat_table_html + "</section>")
     if twitter_html:
         sections.append("<section class='card'><h2 class='main-title'>Twitter 美国科技公司 AI 动态</h2><ul>" + "".join(twitter_html) + "</ul>" + twitter_table_html + "</section>")
-    if broker_html:
-        sections.append("<section class='card'><h2 class='main-title'>券商 AI 研报（10 大）</h2><ul>" + "".join(broker_html) + "</ul>" + broker_table_html + "</section>")
-    if suggestions:
-        sections.append(f"<section class='card'><h2 class='main-title'>执行建议</h2><ul>{''.join([f'<li>{escape(str(s))}</li>' for s in suggestions])}</ul></section>")
+    if broker_reports:
+        sections.append("<section class='card'><h2 class='main-title'>券商 AI 研报（10 大）</h2>" + broker_table_html + "</section>")
 
     if isinstance(policy, dict):
         policy_html = (
