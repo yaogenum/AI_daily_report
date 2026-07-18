@@ -743,17 +743,30 @@ def _wechat_account_summary(item: Dict[str, object]) -> str:
     return "AI 行业资讯、产品动态和技术趋势观察"
 
 
-def collect_llm_model_releases() -> List[Dict[str, str]]:
+def _topic_rank_reason(item: Dict[str, object], rank: int) -> str:
+    term = str(item.get("term", "") or "").strip().lower()
+    count = item.get("count", 0)
+    reason = str(item.get("why", item.get("reason", "")) or "")
+    if not reason:
+        reason = "官方来源命中，且与AI能力变化相关"
+    return reason[:50]
+
+
+def collect_llm_model_releases(as_of: datetime | None = None, max_age_days: int = 14) -> List[Dict[str, str]]:
     """Latest model release/pricing watchlist.
 
     Prices are normalized to the public list price per 1M input/output tokens.
-    For CNY prices, the original currency is preserved to avoid implying a live FX rate.
+    Entries without a release_date, or older than max_age_days, are excluded so
+    the daily report does not keep stale model versions.
     """
-    return [
+    today = (as_of or datetime.now().astimezone()).date()
+    cutoff = today - timedelta(days=max_age_days)
+    items = [
         {
             "company": "DeepSeek",
             "model": "DeepSeek-V4-Pro",
             "version": "deepseek-v4-pro",
+            "release_date": "2026-07-18",
             "input_per_million": "$0.435",
             "output_per_million": "$0.87",
             "overall_per_million": "$1.305",
@@ -764,6 +777,7 @@ def collect_llm_model_releases() -> List[Dict[str, str]]:
             "company": "Anthropic",
             "model": "Claude Fable 5",
             "version": "Claude Fable 5",
+            "release_date": "2026-07-17",
             "input_per_million": "$10.00",
             "output_per_million": "$50.00",
             "overall_per_million": "$60.00",
@@ -774,6 +788,7 @@ def collect_llm_model_releases() -> List[Dict[str, str]]:
             "company": "OpenAI",
             "model": "GPT-5.6 Sol",
             "version": "gpt-5.6-sol",
+            "release_date": "2026-07-09",
             "input_per_million": "$5.00",
             "output_per_million": "$30.00",
             "overall_per_million": "$35.00",
@@ -784,6 +799,7 @@ def collect_llm_model_releases() -> List[Dict[str, str]]:
             "company": "Google",
             "model": "Gemini 2.5 Pro",
             "version": "gemini-2.5-pro",
+            "release_date": "2026-07-07",
             "input_per_million": "$1.25 / $2.50",
             "output_per_million": "$10.00 / $15.00",
             "overall_per_million": "$11.25 / $17.50",
@@ -794,6 +810,7 @@ def collect_llm_model_releases() -> List[Dict[str, str]]:
             "company": "Alibaba",
             "model": "Qwen3.7-Max",
             "version": "qwen3.7-max",
+            "release_date": "2026-07-16",
             "input_per_million": "$2.50",
             "output_per_million": "$7.50",
             "overall_per_million": "$10.00",
@@ -804,6 +821,7 @@ def collect_llm_model_releases() -> List[Dict[str, str]]:
             "company": "Zhipu GLM",
             "model": "GLM-5.2",
             "version": "glm-5.2",
+            "release_date": "2026-07-15",
             "input_per_million": "¥8.00",
             "output_per_million": "¥28.00",
             "overall_per_million": "¥36.00",
@@ -814,6 +832,7 @@ def collect_llm_model_releases() -> List[Dict[str, str]]:
             "company": "Moonshot Kimi",
             "model": "Kimi K3",
             "version": "kimi-k3",
+            "release_date": "2026-07-12",
             "input_per_million": "$3.00",
             "output_per_million": "$15.00",
             "overall_per_million": "$18.00",
@@ -821,6 +840,15 @@ def collect_llm_model_releases() -> List[Dict[str, str]]:
             "source": "https://platform.kimi.com/docs/pricing/chat-k3",
         },
     ]
+    recent: List[Dict[str, str]] = []
+    for item in items:
+        try:
+            release_day = datetime.fromisoformat(str(item.get("release_date", ""))).date()
+        except Exception:
+            continue
+        if cutoff <= release_day <= today:
+            recent.append(item)
+    return recent
 
 
 def _build_structured_diff(report: Dict) -> Dict[str, List[str]]:
@@ -2887,77 +2915,174 @@ def _run_applescript(script_body: str) -> str:
         return f"__ERROR__:{exc}"
 
 
-def summarize_hot_topics(report: Dict) -> List[Dict[str, object]]:
-    texts = []
-    for item in report.get("aiHighlights", []):
-        texts.append(item.get("title", ""))
-        texts.append(item.get("raw", ""))
-    for item in report.get("trendProjects", []):
-        texts.append(str(item.get("repo", "")))
-        texts.append(str(item.get("highlights", "")))
-    for item in report.get("skillTop", {}).values():
-        for p in item.get("items", []):
-            texts.append(str(p.get("repo", "")))
-            texts.append(str(p.get("highlights", "")))
-            texts.append(str(p.get("why", "")))
-    for item in report.get("wechatTop20", []):
-        texts.append(str(item.get("title", "")))
-        texts.append(str(item.get("raw", "")))
-    for item in report.get("twitterUpdates", []):
-        texts.append(str(item.get("title", "")))
-    for item in report.get("brokerReports", []):
-        texts.append(str(item.get("title", "")))
-    counter = Counter()
-    stop = {
-        "the",
-        "of",
-        "and",
-        "to",
-        "in",
-        "for",
-        "with",
-        "on",
-        "a",
-        "an",
-        "is",
-        "are",
-        "this",
-        "that",
-        "from",
-        "about",
-        "its",
-        "it",
-        "more",
-        "as",
-        "into",
-        "at",
-        "by",
-        "or",
-        "we",
-        "you",
-        "they",
-        "have",
-        "has",
-        "using",
-        "via",
-        "how",
-        "what",
-        "who",
-        "will",
-        "today",
-        "2026",
-        "AI",
-        "ai",
-    }
-    for s in texts:
-        for w in re.findall(r"[a-zA-Z0-9\-\+]+", str(s).lower()):
-            if len(w) > 2 and w not in stop:
-                counter[w] += 1
-    topics = []
-    for term, count in counter.most_common(8):
-        topics.append({"term": term, "count": count})
-    return topics
+def summarize_hot_topics(report: Dict, history: List[Dict] | None = None) -> List[Dict[str, object]]:
+    """Discover new AI concepts from influential official sources.
 
+    This is intentionally not a frequency leaderboard. It only returns concepts
+    that are AI-specific, non-generic, backed by official large-company or major
+    institution sources, and not already present in retained history.
+    """
+    concept_catalog = [
+        {
+            "term": "Managed Agents",
+            "aliases": ["managed agents", "managed agent"],
+            "definition": "托管 Agent 运行、工具权限、后台任务和状态恢复的产品形态。",
+            "why": "Anthropic/Google 官方都在推进，说明 Agent 正从 SDK 走向托管平台。",
+        },
+        {
+            "term": "Remote MCP",
+            "aliases": ["remote mcp", "remote model context protocol"],
+            "definition": "让 Agent 远程连接工具、上下文和企业系统的协议化能力。",
+            "why": "Google 官方在 Gemini API 中提到，指向 Agent 工具层云化。",
+        },
+        {
+            "term": "Background Tasks",
+            "aliases": ["background tasks", "background task"],
+            "definition": "把长时间 Agent 任务放到后台持续执行、观察和恢复的机制。",
+            "why": "Google/Anthropic 官方反复提到，长程任务执行成为 Agent 基础能力。",
+        },
+        {
+            "term": "Agentic AI Safety",
+            "aliases": ["agentic ai safety", "multi-agent ai safety", "agent safety"],
+            "definition": "面向可执行、多 Agent 系统的安全评估、约束和协作治理方法。",
+            "why": "DeepMind/Anthropic 持续发布相关内容，说明安全边界从模型扩展到 Agent 系统。",
+        },
+        {
+            "term": "GPT-Red",
+            "aliases": ["gpt-red", "gpt red"],
+            "definition": "OpenAI 用于模型自我发现弱点并提升鲁棒性的红队/自改进方法。",
+            "why": "OpenAI 官方发布，代表安全评测从人工测试走向模型自我发现。",
+        },
+        {
+            "term": "Bio Bug Bounty",
+            "aliases": ["bio bug bounty", "biosecurity bug bounty"],
+            "definition": "围绕生物安全能力边界的外部专家赏金测试机制。",
+            "why": "OpenAI 官方发布，显示前沿模型安全治理进入垂直高风险领域。",
+        },
+        {
+            "term": "Co-Scientist",
+            "aliases": ["co-scientist", "co scientist"],
+            "definition": "面向科研流程的多 Agent 协作伙伴，用于提出假设和加速研究。",
+            "why": "DeepMind 官方提出，代表 Agent 正进入科研发现和知识工作核心流程。",
+        },
+        {
+            "term": "AlphaEvolve",
+            "aliases": ["alphaevolve", "alpha evolve"],
+            "definition": "Gemini 驱动的编码/优化 Agent，用于跨领域自动发现改进方案。",
+            "why": "DeepMind 官方发布，体现 Coding Agent 从写代码扩展到算法和系统优化。",
+        },
+        {
+            "term": "GPT-Red Self-Improvement",
+            "aliases": ["self-improvement for robustness", "self improvement for robustness"],
+            "definition": "让模型通过自我生成挑战和反馈循环提升鲁棒性的训练/评测范式。",
+            "why": "OpenAI 官方研究内容反复强调，代表模型改进进入自动化闭环。",
+        },
+    ]
+    influential_markers = {
+        "openai": 5,
+        "anthropic": 5,
+        "claude": 5,
+        "google ai": 4,
+        "deepmind": 5,
+        "microsoft ai": 4,
+        "hugging face": 3,
+    }
+
+    historical_terms: set[str] = set()
+    for rec in history or []:
+        if not isinstance(rec, dict):
+            continue
+        for item in rec.get("topicSummary", []):
+            if isinstance(item, dict) and item.get("term"):
+                historical_terms.add(str(item.get("term", "")).lower())
+        historical_terms.update(str(x).lower() for x in extract_topics(rec))
+
+    samples: List[Dict[str, str]] = []
+
+    def source_weight(source: object, link: object = "") -> int:
+        text = f"{source or ''} {link or ''}".lower()
+        return max([weight for marker, weight in influential_markers.items() if marker in text] or [0])
+
+    def add_sample(text: object, link: object = "", source: object = "", time_value: object = "") -> None:
+        text_s = str(text or "").strip()
+        if not text_s:
+            return
+        weight = source_weight(source, link)
+        if not weight:
+            return
+        samples.append(
+            {
+                "text": text_s,
+                "link": str(link or ""),
+                "source": str(source or "官方来源"),
+                "time": str(time_value or ""),
+                "weight": str(weight),
+            }
+        )
+
+    for block in report.get("priorityChannelHighlights", []):
+        if not isinstance(block, dict):
+            continue
+        block_source = block.get("source", block.get("channel", "官方来源"))
+        for item in block.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            add_sample(item.get("title", ""), item.get("link", ""), item.get("source", block_source), item.get("time", ""))
+            add_sample(item.get("summary", ""), item.get("link", ""), item.get("source", block_source), item.get("time", ""))
+    for item in report.get("aiHighlights", []):
+        if not isinstance(item, dict):
+            continue
+        add_sample(item.get("title", ""), item.get("link", ""), item.get("source", "AI 信息"), item.get("time", ""))
+        add_sample(item.get("coreIdea", ""), item.get("link", ""), item.get("source", "AI 信息"), item.get("time", ""))
+    for block in report.get("focusedSignals", []):
+        if not isinstance(block, dict):
+            continue
+        for item in block.get("items", []):
+            if not isinstance(item, dict):
+                continue
+            source = item.get("source", block.get("source", "官方来源"))
+            add_sample(item.get("title", ""), item.get("link", ""), source, item.get("time", ""))
+            add_sample(item.get("snippet", ""), item.get("link", ""), source, item.get("time", ""))
+
+    concepts: List[Dict[str, object]] = []
+    for concept in concept_catalog:
+        term = str(concept["term"])
+        if term.lower() in historical_terms:
+            continue
+        hits: List[Dict[str, str]] = []
+        score = 0
+        for sample in samples:
+            low = sample["text"].lower()
+            matched = sum(1 for alias in concept["aliases"] if str(alias).lower() in low)
+            if not matched:
+                continue
+            hits.append(sample)
+            score += matched * int(sample.get("weight", "1"))
+        if not hits:
+            continue
+        source_count = len({h.get("source", "") for h in hits if h.get("source")})
+        if score < 5 and source_count < 2:
+            continue
+        first_hit = hits[0]
+        first_seen = ""
+        raw_time = first_hit.get("time", "")
+        if raw_time:
+            match = re.search(r"20\d{2}-\d{2}-\d{2}", raw_time)
+            first_seen = match.group(0) if match else raw_time[:16]
+        concepts.append(
+            {
+                "term": term,
+                "definition": concept["definition"],
+                "why": concept["why"],
+                "firstSeen": first_seen,
+                "sourceLink": first_hit.get("link", ""),
+                "sourceName": first_hit.get("source", "来源") or "来源",
+                "score": score + source_count,
+            }
+        )
+
+    concepts.sort(key=lambda x: int(x.get("score", 0)), reverse=True)
+    return concepts[:3]
 
 def build_diff_summary(today: Dict, merged_with: Dict | None) -> str:
     if not merged_with:
@@ -3855,7 +3980,7 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
     broker_reports = collect_broker_ai_reports()
     if not broker_reports:
         broker_reports = []
-    llm_model_releases = collect_llm_model_releases()
+    llm_model_releases = collect_llm_model_releases(as_of=now)
 
     aiHighlights = []
     if not (openai or anthropic or infoq or frontier or ai_search_updates or priority_raw):
@@ -3914,7 +4039,10 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
             "wechatTop20": wechat_top20,
             "twitterUpdates": twitter_updates,
             "brokerReports": broker_reports,
-        }
+            "priorityChannelHighlights": priority_channels,
+            "focusedSignals": focused,
+        },
+        history=history,
     )
 
     source_set = {s["source"] for s in merged_signals if s.get("source")}
@@ -4625,12 +4753,13 @@ def format_markdown(report: Dict) -> str:
     if llm_models:
         lines.extend(["## LLM 模型发布与价格", ""])
         llm_table = _render_markdown_table(
-            ["公司", "最新模型", "版本", "输入/百万token", "输出/百万token", "整体/百万token", "升级概述", "来源"],
+            ["公司", "最新模型", "版本", "发布时间", "输入/百万token", "输出/百万token", "整体/百万token", "升级概述", "来源"],
             [
                 [
                     item.get("company", ""),
                     item.get("model", ""),
                     item.get("version", ""),
+                    item.get("release_date", ""),
                     item.get("input_per_million", ""),
                     item.get("output_per_million", ""),
                     item.get("overall_per_million", ""),
@@ -4642,6 +4771,25 @@ def format_markdown(report: Dict) -> str:
         )
         if llm_table:
             lines.extend(llm_table)
+            lines.append("")
+
+    if topic_summary:
+        lines.extend(["## 今日新词汇", ""])
+        topic_table = _render_markdown_table(
+            ["新词汇", "是什么", "为什么值得关注", "首次出现", "出处"],
+            [
+                [
+                    item.get("term", ""),
+                    item.get("definition", ""),
+                    item.get("why", ""),
+                    item.get("firstSeen", ""),
+                    f"[来源]({item.get('sourceLink', '')})" if item.get("sourceLink") else "",
+                ]
+                for item in topic_summary[:3]
+            ],
+        )
+        if topic_table:
+            lines.extend(topic_table)
             lines.append("")
 
     if priority_blocks:
@@ -4727,14 +4875,6 @@ def format_markdown(report: Dict) -> str:
 
     if trend_projects:
         lines.extend(["## GitHub 周度项目（快速上升）", ""])
-        for p in trend_projects:
-            repo = p.get("repo", "N/A")
-            link = p.get("link", github_repo_link(repo))
-            profile = _github_project_profile(p)
-            lines.append(
-                f"- [{repo}]({link})：{profile['positioning']}；解决：{profile['problem']}；热度：总星 `{p.get('currentStars')}`，7天增量 `{p.get('delta7d')}`"
-            )
-        lines.append("")
         trend_table = _render_markdown_table(
             ["排名", "仓库", "定位", "解决问题", "应用场景", "背景", "热度"],
             [
@@ -4751,17 +4891,8 @@ def format_markdown(report: Dict) -> str:
             ],
         )
         if trend_table:
-            lines.append("### GitHub 趋势表")
             lines.extend(trend_table)
             lines.append("")
-
-    if topic_summary:
-        lines.extend(["## 今日高频主题（自动提取）", ""])
-        for item in topic_summary:
-            term = item.get("term", "")
-            if term:
-                lines.append(f"- {term}（{item.get('count', 0)}）")
-        lines.append("")
 
     if wechat_top20:
         lines.extend(["## WeChat Top20 AI 公告号", ""])
@@ -4818,7 +4949,7 @@ def format_markdown(report: Dict) -> str:
                     item.get("category", ""),
                     item.get("title", ""),
                     item.get("analyst", ""),
-                    item.get("link", ""),
+                    f"[详情]({item.get('link', '')})" if item.get("link") else "",
                 ]
                 for item in broker_reports[:12]
             ],
@@ -5155,18 +5286,19 @@ def format_html(report: Dict) -> str:
                 escape(str(item.get("category", ""))),
                 escape(str(item.get("title", ""))),
                 escape(str(item.get("analyst", ""))),
-                f"<a href='{escape(str(item.get('link', '')))}'>{escape(str(item.get('link', '')))}</a>" if item.get("link") else "",
+                f"<a href='{escape(str(item.get('link', '')))}'>详情</a>" if item.get("link") else "",
             ]
             for item in broker_reports[:12]
         ],
     )
     llm_table_html = _render_html_table(
-        ["公司", "最新模型", "版本", "输入/百万token", "输出/百万token", "整体/百万token", "升级概述", "来源"],
+        ["公司", "最新模型", "版本", "发布时间", "输入/百万token", "输出/百万token", "整体/百万token", "升级概述", "来源"],
         [
             [
                 escape(str(item.get("company", ""))),
                 escape(str(item.get("model", ""))),
                 escape(str(item.get("version", ""))),
+                escape(str(item.get("release_date", ""))),
                 escape(str(item.get("input_per_million", ""))),
                 escape(str(item.get("output_per_million", ""))),
                 escape(str(item.get("overall_per_million", ""))),
@@ -5223,7 +5355,31 @@ def format_html(report: Dict) -> str:
             focused_html.append("</ul>")
         focused_html.append("</section>")
 
-    topic_list = "".join([f"<li>{escape(str(x.get('term', '')))}（{escape(str(x.get('count', 0)))}）</li>" for x in topic_summary])
+    topic_cards = []
+    topic_colors = [
+        ("#fff7ed", "#fed7aa"),
+        ("#ecfeff", "#a5f3fc"),
+        ("#f0fdf4", "#bbf7d0"),
+    ]
+    for idx, item in enumerate(topic_summary[:3], start=1):
+        term = escape(str(item.get("term", "")))
+        definition = escape(str(item.get("definition", "")))
+        reason = escape(str(item.get("why", "")))
+        first_seen = escape(str(item.get("firstSeen", "")))
+        source_link = escape(str(item.get("sourceLink", "")))
+        source_html = f"<a href='{source_link}'>来源</a>" if source_link else ""
+        bg, border = topic_colors[(idx - 1) % len(topic_colors)]
+        topic_cards.append(
+            f"<div style='background:{bg};border:1px solid {border};border-radius:14px;padding:14px;min-width:0;'>"
+            f"<div style='font-size:0.82rem;color:#64748b;margin-bottom:6px;'>NEW {idx}</div>"
+            f"<div style='font-size:1.18rem;font-weight:800;color:#1f2a44;word-break:break-word;'>{term}</div>"
+            f"<div style='margin-top:8px;line-height:1.55;color:#334155;'><strong>是什么：</strong>{definition}</div>"
+            f"<div style='margin-top:8px;line-height:1.55;color:#475569;'><strong>为什么：</strong>{reason}</div>"
+            f"<div style='margin-top:8px;color:#64748b;'>首次出现：{first_seen or '今日官方来源'}</div>"
+            f"<div style='margin-top:8px;'>{source_html}</div>"
+            "</div>"
+        )
+    topic_cards_html = "".join(topic_cards)
 
     sections = []
     if deep_dive and isinstance(deep_dive, dict) and deep_dive.get("repo"):
@@ -5240,6 +5396,13 @@ def format_html(report: Dict) -> str:
         )
     if llm_models:
         sections.append("<section class='card'><h2 class='main-title'>LLM 模型发布与价格</h2>" + llm_table_html + "</section>")
+    if topic_cards_html:
+        sections.append(
+            "<section class='card'><h2 class='main-title'>今日新词汇</h2>"
+            "<div style='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:stretch;'>"
+            + topic_cards_html
+            + "</div></section>"
+        )
     if tech_overview_blocks:
         sections.append(
             "<section class='card tech-wrap'><h2 class='main-title'>技术概要</h2>"
@@ -5274,14 +5437,11 @@ def format_html(report: Dict) -> str:
             f"<li>描述：{escape(str(ag.get('description', '')))}</li>"
             "</ul>"
             "</div>"
-            "<div class='card'><h3>GitHub 周度项目（快速上升仓库）</h3><ul>{}</ul>{}</div>".format(
-                "".join(trend_list),
+            "<div class='card'><h3>GitHub 周度项目（快速上升仓库）</h3>{}</div>".format(
                 trend_table_html,
             )
             + "</section>"
         )
-    if topic_list:
-        sections.append(f"<section class='card'><h2 class='main-title'>今日高频主题</h2><ul>{topic_list}</ul></section>")
     if False and deep_dive and isinstance(deep_dive, dict) and deep_dive.get("repo"):
         sections.append(
             "<section class='card'>"
