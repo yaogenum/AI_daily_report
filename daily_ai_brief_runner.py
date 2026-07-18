@@ -4253,29 +4253,22 @@ def format_markdown(report: Dict) -> str:
 def format_html(report: Dict) -> str:
     ag = report.get("ag_ui", {})
     policy = report.get("record_policy")
+    source_list = report.get("source_channels", [])
+    priority_blocks = report.get("priorityChannelHighlights", [])
+    ai_highlights = report.get("aiHighlights", [])
+    skill_blocks = report.get("skillTop", {}) or {}
+    trend_projects = report.get("trendProjects", [])
+    wechat_top20 = report.get("wechatTop20", [])
+    twitter_updates = report.get("twitterUpdates", [])
+    broker_reports = report.get("brokerReports", [])
+    llm_models = report.get("llmModelReleases", [])
+    topic_summary = report.get("topicSummary", [])
+    focused_blocks = report.get("focusedSignals", [])
+    deep_dive = report.get("githubDeepDive")
 
     priority_blocks = report.get("priorityChannelHighlights", [])
     priority_html = []
-    if priority_blocks:
-        for block in priority_blocks:
-            channel = escape(block.get("channel", "官方渠道"))
-            priority_html.append(f"<section class='card'><h3>{channel}</h3><ul>")
-            for item in block.get("items", []):
-                title = escape(item.get("title", ""))
-                source = escape(item.get("source", ""))
-                time = escape(str(item.get("time", "")))
-                summary = escape(str(item.get("summary", "")))
-                link = escape(str(item.get("link", "")))
-                item_html = f"<li><strong>{title}</strong>（{source}{(' | ' + time) if time else ''})"
-                if summary:
-                    item_html += f"<br/>摘要：{summary}"
-                if link:
-                    item_html += f"<br/><a href='{link}'>{link}</a>"
-                item_html += "</li>"
-                priority_html.append(item_html)
-            priority_html.append("</ul></section>")
-    else:
-        priority_html.append("<section class='card'><h3>优先官方渠道</h3><p>本期未抓到两大官方渠道近一周可确认内容（或页面发布时间不可解析）。</p></section>")
+    ai_highlights = report.get("aiHighlights", [])
 
     ai_html = []
     for item in report.get("aiHighlights", []):
@@ -4469,718 +4462,8 @@ def format_html(report: Dict) -> str:
         return ordered
 
     tech_overview_blocks = []
-    merged_priority_items: List[Dict[str, object]] = []
-    for block in priority_blocks:
-        items = block.get("items", [])
-        if isinstance(items, list):
-            merged_priority_items.extend([i for i in items if isinstance(i, dict)])
-
-    if merged_priority_items:
-        summary_points: List[str] = []
-        generic_tech_labels = {"Agent", "Workflow", "Memory", "Tools", "API", "Policy"}
-        generic_tech_terms = {x.lower() for x in generic_tech_labels}
-
-        def _is_generic_tech_point(point: str) -> bool:
-            text = point.strip()
-            low = text.lower()
-            if low in generic_tech_terms:
-                return True
-            for label in generic_tech_labels:
-                if text.startswith(f"{label}（置信度："):
-                    return True
-            return len(text) <= 10 and low in {"agent", "workflow", "memory", "tools", "api", "policy"}
-
-        signal_points = _build_architecture_signal_map(merged_priority_items)
-        architecture_trace_points = [
-            f"{label}（置信度：{_confidence_label(score)}）"
-            for label, score in signal_points
-            if label and score >= 2 and label not in generic_tech_labels
-        ]
-        summary_points.extend(architecture_trace_points)
-
-        for item in merged_priority_items:
-            title = str(item.get("title", "")).strip()
-            summary = str(item.get("summary", "")).strip()
-            text = f"{title} {summary}"
-            for clue in _extract_highlights(text):
-                if clue not in summary_points and not _is_generic_tech_point(clue):
-                    summary_points.append(clue)
-
-        # 去重并控制条目长度，保留核心信息
-        deduped_points: List[str] = []
-        for p in summary_points:
-            if p and p not in deduped_points and not _is_generic_tech_point(p):
-                deduped_points.append(p)
-        summary_points = deduped_points[:8]
-
-        if summary_points:
-            tech_points = "".join([f"<li>{escape(_shorten(item))}</li>" for item in summary_points])
-            tech_overview_blocks.append(
-                "<section class='card tech-card'>"
-                "<h3>Claude + OpenAI 技术概要</h3>"
-                "<div class='card-inner'>"
-                "<p>技术要点（仅展示可复用的框架 / SKILL / 能力线索）</p>"
-                f"<ul>{tech_points}</ul>"
-                "</div>"
-                "</section>"
-            )
-
-    panels = {
-        "priority": "".join(priority_html),
-        "ai": "".join(ai_html),
-        "skill": "".join(skill_html),
-        "trend": "".join([
-            "<div class='card'><h3>AG-UI</h3><ul>"
-            f"<li>仓库：<a href=\"{escape(ag.get('link', 'https://github.com/ag-ui-protocol/ag-ui'))}\">{escape(ag.get('repo', 'ag-ui-protocol/ag-ui'))}</a></li>"
-            f"<li>链接：<a href=\"{escape(ag.get('link', 'https://github.com/ag-ui-protocol/ag-ui'))}\">https://github.com/ag-ui-protocol/ag-ui</a></li>"
-            f"<li>当前星标：{escape(str(ag.get('stars', 'N/A')))}</li>"
-            f"<li>描述：{escape(ag.get('description', ''))}</li>"
-            "</ul></div>"
-            "<div class='card'><h3>GitHub 周度项目（快速上升）</h3>"
-            f"<ul>{trend_html_snippet}</ul></div>"
-        ]),
-        "chat": f"<div class='card'><ul>{''.join(wechat_html)}</ul></div>",
-        "twitter": f"<div class='card'><ul>{''.join(twitter_html)}</ul></div>",
-        "broker": f"<div class='card'><h3>券商 AI 研报（10 大）</h3><ul>{''.join(broker_html)}</ul></div>",
-        "suggest": f"<div class='card'><ul>{suggestion_html}</ul></div>",
-        "diff": (
-            "<div class='card'><p>今日差异："
-            f"{escape(report.get('diffSummary', ''))}</p>{policy_html}</div>"
-        ),
-    }
-    topic_panel = f"<div class='card'><h3>今日高频主题</h3><ul>{topic_list_html}</ul></div>"
-    panels["trend"] = topic_panel + panels["trend"]
-
-    return f"""
-<!doctype html>
-<html lang=\"zh-CN\">
-<head>
-  <meta charset=\"utf-8\" />
-  <title>{escape(report.get('title', 'AI 研究日报'))}</title>
-  <style>
-    :root {{
-      --rainbow: linear-gradient(120deg, #ff7eb3, #ffbf7e, #7cf7bf, #79d9ff, #7b9dff, #d88bff);
-      --ink: #1f2937;
-      --subtle: #64748b;
-      --line: #e2e8f0;
-      --card-bg: #ffffff;
-      --card-border: #dbeafe;
-      --chip: #eef2ff;
-      --chip-active: #dbeafe;
-      --shadow-soft: 0 10px 26px rgba(15, 23, 42, 0.09);
-    }}
-    body {{
-      font-family: "PingFang SC", "Microsoft YaHei", Arial, sans-serif;
-      margin: 0;
-      color: var(--ink);
-      background:
-        radial-gradient(circle at 6% 12%, rgba(255, 211, 231, 0.45), transparent 36%),
-        radial-gradient(circle at 94% 0%, rgba(186, 233, 255, 0.45), transparent 40%),
-        linear-gradient(160deg, #f9fbff 0%, #fff8f0 100%);
-      min-height: 100vh;
-    }}
-    .page {{
-      max-width: 1120px;
-      margin: 16px auto 28px;
-      padding: 0 14px 28px;
-    }}
-    .hero {{
-      background: linear-gradient(135deg, #7f6cff 0%, #46a8ff 55%, #7ce8a8 100%);
-      color: #fff;
-      border-radius: 14px;
-      padding: 16px 20px;
-      margin-bottom: 14px;
-      box-shadow: var(--shadow-soft);
-    }}
-    h1 {{
-      margin: 0;
-      letter-spacing: 0.3px;
-      font-size: 1.45rem;
-    }}
-    .hero p {{
-      margin: 8px 0 0;
-      color: rgba(255, 255, 255, 0.95);
-      line-height: 1.65;
-    }}
-    h2 {{
-      margin: 24px 0 10px;
-      padding: 6px 10px;
-      border-radius: 10px;
-      display: inline-flex;
-      align-items: center;
-      background: linear-gradient(90deg, rgba(255, 140, 194, 0.2), rgba(124, 218, 255, 0.2), rgba(255, 220, 160, 0.2));
-      color: #1f2a44;
-      font-size: 1.12rem;
-    }}
-    .content {{
-      display: grid;
-      grid-template-columns: 1fr;
-      gap: 12px;
-    }}
-    .card {{
-      position: relative;
-      background: var(--card-bg);
-      padding: 14px 16px;
-      border-radius: 14px;
-      border: 1px solid var(--card-border);
-      margin-bottom: 12px;
-      box-shadow: var(--shadow-soft);
-      overflow: hidden;
-      backdrop-filter: blur(0.5px);
-    }}
-    .card::before {{
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      width: 100%;
-      height: 4px;
-      background: var(--rainbow);
-    }}
-    .card::after {{
-      content: '';
-      position: absolute;
-      left: 0;
-      top: 4px;
-      width: 5px;
-      height: calc(100% - 4px);
-      background: linear-gradient(180deg, #ff66c4 0%, #ffb16e 25%, #fff38f 50%, #7ef7c1 75%, #7ac3ff 100%);
-    }}
-    .card h3 {{ margin-top: 2px; position: relative; z-index: 1; }}
-    code {{ background: #f1f5f9; padding: 2px 6px; border-radius: 4px; font-size: 0.95rem; }}
-    a {{ color: #5b4bff; text-underline-offset: 2px; }}
-    ul {{ margin: 8px 0 0; padding-left: 20px; }}
-    p {{ line-height: 1.7; }}
-    .main-title {{ margin: 0 0 12px; display: block; }}
-    .tech-wrap {{ display: grid; gap: 12px; }}
-    @media (max-width: 920px) {{
-    }}
-  </style>
-</head>
-<body>
-  <div class=\"page\">
-  <div class=\"hero\">
-    <h1>{escape(report.get('title', 'AI 研究日报'))}</h1>
-    <p>执行时间：{escape(report['date'])}（{escape(report['timezone'])}）<br/>数据源：{escape(' / '.join(report.get('source_channels', [])) or 'OpenAI / Anthropic / INFOQ / GitHub / AG-UI / 微信 / Twitter / 券商研报')}</p>
-  </div>
-
-  <div class=\"content\">
-    <section class=\"card tech-wrap\">
-      <h2 class=\"main-title\">技术概要</h2>
-      {''.join(tech_overview_blocks)}
-    </section>
-    <section class=\"card\">
-      <h2 class=\"main-title\">优先渠道（最近一周）：Claude Blog / OpenAI Research</h2>
-      {panels["priority"]}
-    </section>
-    <section class=\"card\">
-      <h2 class=\"main-title\">AI 信息</h2>
-      {panels["ai"]}
-    </section>
-    <section class=\"card\">
-      <h2 class=\"main-title\">SKILL Top3</h2>
-      {panels["skill"]}
-    </section>
-    <section class=\"card\">
-      <h2 class=\"main-title\">AG-UI 与趋势</h2>
-      {panels["trend"]}
-    </section>
-    <section class=\"card\">
-      <h2 class=\"main-title\">WeChat Top20 AI 公告号</h2>
-      {panels["chat"]}
-    </section>
-    <section class=\"card\">
-      <h2 class=\"main-title\">Twitter 美国科技公司 AI 动态</h2>
-      {panels["twitter"]}
-    </section>
-    <section class=\"card\">
-      <h2 class=\"main-title\">券商 AI 研报（10 大）</h2>
-      {panels["broker"]}
-    </section>
-    <section class=\"card\">
-      <h2 class=\"main-title\">执行建议</h2>
-      {panels["suggest"]}
-    </section>
-    <section class=\"card\">
-      <h2 class=\"main-title\">合并与差异</h2>
-      {panels["diff"]}
-    </section>
-  </div>
-</div>
-</body>
-</html>
-""".strip()
-
-
-def format_markdown(report: Dict) -> str:
-    source_list = report.get("source_channels", [])
-    priority_blocks = report.get("priorityChannelHighlights", [])
-    focused_blocks = report.get("focusedSignals", [])
-    ai_highlights = report.get("aiHighlights", [])
-    trend_projects = report.get("trendProjects", [])
-    skill_blocks = report.get("skillTop", {}) or {}
-    topic_summary = report.get("topicSummary", [])
-    wechat_top20 = report.get("wechatTop20", [])
-    twitter_updates = report.get("twitterUpdates", [])
-    broker_reports = report.get("brokerReports", [])
-    llm_models = report.get("llmModelReleases", [])
-    suggestions = report.get("suggestions", [])
-    deep_dive = report.get("githubDeepDive")
-    ag = report.get("ag_ui", {})
-
-    lines = [
-        f"# {report['title']}",
-        f"- 执行时间：{report['date']}（{report['timezone']}）",
-        f"- 数据源：{' / '.join(source_list) if source_list else 'OpenAI / Anthropic / INFOQ / GitHub / AG-UI / 微信 / Twitter / 券商研报'}",
-        "",
-    ]
-
-    if isinstance(deep_dive, dict) and deep_dive.get("repo"):
-        lines.extend(["## GitHub 高增长项目深度解读", ""])
-        lines.append(
-            f"- 仓库：[{deep_dive.get('repo', '')}]({deep_dive.get('link', github_repo_link(deep_dive.get('repo', '')) )})"
-        )
-        lines.append(f"- {_github_deep_dive_recommendation(deep_dive)}")
-        lines.append(f"- 关注指标：⭐ {deep_dive.get('stars', 0)} / 7天增量 {deep_dive.get('delta7d', 0)}")
-        if deep_dive.get("problem"):
-            lines.append(f"- 解决问题：{deep_dive.get('problem')}")
-        if deep_dive.get("solution"):
-            lines.append(f"- 解决思路：{deep_dive.get('solution')}")
-        if deep_dive.get("architecture"):
-            lines.append(f"- 架构设计：{deep_dive.get('architecture')}")
-        lines.append("")
-
-    if llm_models:
-        lines.extend(["## LLM 模型发布与价格", ""])
-        llm_table = _render_markdown_table(
-            ["公司", "最新模型", "版本", "发布时间", "输入/百万token", "输出/百万token", "整体/百万token", "升级概述", "来源"],
-            [
-                [
-                    item.get("company", ""),
-                    item.get("model", ""),
-                    item.get("version", ""),
-                    item.get("release_date", ""),
-                    item.get("input_per_million", ""),
-                    item.get("output_per_million", ""),
-                    item.get("overall_per_million", ""),
-                    item.get("summary", ""),
-                    item.get("source", ""),
-                ]
-                for item in llm_models
-            ],
-        )
-        if llm_table:
-            lines.extend(llm_table)
-            lines.append("")
-
-    if topic_summary:
-        lines.extend(["## 今日新词汇", ""])
-        topic_table = _render_markdown_table(
-            ["新词汇", "是什么", "为什么值得关注", "首次出现", "出处"],
-            [
-                [
-                    item.get("term", ""),
-                    item.get("definition", ""),
-                    item.get("why", ""),
-                    item.get("firstSeen", ""),
-                    f"[来源]({item.get('sourceLink', '')})" if item.get("sourceLink") else "",
-                ]
-                for item in topic_summary[:3]
-            ],
-        )
-        if topic_table:
-            lines.extend(topic_table)
-            lines.append("")
-
-    if priority_blocks:
-        lines.append("## [优先] Claude / OpenAI Research 近一周官方更新")
-        for block in priority_blocks:
-            lines.append(f"### {block.get('channel', '官方渠道')}")
-            for item in block.get("items", []):
-                title = item.get("title", "")
-                source = item.get("source", "")
-                link = item.get("link", "")
-                time = item.get("time", "")
-                summary = item.get("summary", "")
-                if not title and not source and not link:
-                    continue
-                lines.append(f"- **{title}**（{source}）{(' | ' + time) if time else ''}")
-                if summary:
-                    lines.append(f"  - 摘要：{summary}")
-                if link:
-                    lines.append(f"  - 链接：{link}")
-                lines.append("")
-            lines.append("")
-
-    if skill_blocks:
-        lines.append("## 明细 Star 的 SKILL（Top3）")
-        for key, block in skill_blocks.items():
-            lines.append(f"### {block.get('title', key)}")
-            if block.get("description"):
-                lines.append(f"- 说明：{block.get('description')}")
-            if block.get("status"):
-                lines.append(f"- 状态：{block.get('status')}")
-            for it in block.get("items", [])[:3]:
-                repo = it.get("repo", "N/A")
-                link = it.get("link", github_repo_link(repo))
-                source = it.get("source", "GitHub")
-                lines.append(
-                    f"- [{repo}]({link})｜来源：{source}｜当前星数 `{it.get('currentStars', 0)}`｜7天增量 `{it.get('delta7d', 0)}`｜{it.get('highlights', it.get('why', ''))}"
-                )
-            lines.append("")
-
-    if focused_blocks:
-        lines.extend(["## 定向细分领域追踪（AU- UI / AI地图 / AI检索与RAG / AI生图 / Agent Team）", ""])
-        for block in focused_blocks:
-            lines.append(f"### {block.get('field', '')}")
-            for item in block.get("items", [])[:4]:
-                title = item.get("title", "")
-                source = item.get("source", "")
-                link = item.get("link", "")
-                time = item.get("time", "")
-                snippet = item.get("snippet", "")
-                if not title:
-                    continue
-                lines.append(f"- **{title}**（{source}）{('，' + time) if time else ''}")
-                if snippet:
-                    lines.append(f"  - {snippet}")
-                if link:
-                    lines.append(f"  - 链接：{link}")
-            lines.append("")
-
-    if ai_highlights:
-        lines.extend(["## AI 信息", "", ""])
-        for item in ai_highlights:
-            title = item.get("title", "")
-            if not title:
-                continue
-            lines.extend(
-                [
-                    f"### {title}",
-                    f"- 来源：{item.get('source', '')}",
-                    f"- 时间：{item.get('time', '')}",
-                    f"- 链接：{item.get('link', '')}",
-                    f"- 核心：{item.get('coreIdea', '')}",
-                    "",
-                ]
-            )
-
-    if ag:
-        lines.extend(["## AG-UI", f"- 仓库：[{ag.get('repo', '')}]({ag.get('link', github_repo_link('ag-ui-protocol/ag-ui'))})"])
-        if ag.get("stars") not in (None, ""):
-            lines.append(f"- 当前星标：{ag.get('stars', 'N/A')}")
-        if ag.get("description"):
-            lines.append(f"- 描述：{ag.get('description', '')}")
-        lines.append("")
-
-    if trend_projects:
-        lines.extend(["## GitHub 周度项目（快速上升）", ""])
-        trend_table = _render_markdown_table(
-            ["排名", "仓库", "定位", "解决问题", "应用场景", "背景", "热度"],
-            [
-                [
-                    p.get("rank", idx),
-                    f"[{p.get('repo', 'N/A')}]({p.get('link', github_repo_link(p.get('repo', '')) )})",
-                    _github_project_profile(p)["positioning"],
-                    _github_project_profile(p)["problem"],
-                    _github_project_profile(p)["scenario"],
-                    _github_project_profile(p)["background"],
-                    _github_project_profile(p)["heat"],
-                ]
-                for idx, p in enumerate(trend_projects, start=1)
-            ],
-        )
-        if trend_table:
-            lines.extend(trend_table)
-            lines.append("")
-
-    if wechat_top20:
-        lines.extend(["## WeChat Top20 AI 公告号", ""])
-        wechat_table = _render_markdown_table(
-            ["排名", "公众号", "ID", "内容概述", "新榜指数", "平均阅读数", "链接"],
-            [
-                [
-                    item.get("rank", idx),
-                    item.get("accountName", item.get("title", "")),
-                    item.get("accountId", ""),
-                    _wechat_account_summary(item),
-                    item.get("score", ""),
-                    item.get("avgReads", ""),
-                    item.get("link", ""),
-                ]
-                for idx, item in enumerate(wechat_top20[:20], start=1)
-            ],
-        )
-        if wechat_table:
-            lines.extend(wechat_table)
-
-    if twitter_updates:
-        lines.extend(["", "## Twitter 美国科技公司 AI 动态", ""])
-        for item in twitter_updates:
-            title = item.get("title", "")
-            if not title:
-                continue
-            lines.append(f"- {item.get('source', 'Twitter')}：{title}")
-        twitter_table = _render_markdown_table(
-            ["账号", "标题", "时间", "链接"],
-            [
-                [
-                    item.get("source", "Twitter"),
-                    item.get("title", ""),
-                    item.get("time", ""),
-                    item.get("link", ""),
-                ]
-                for item in twitter_updates[:12]
-            ],
-        )
-        if twitter_table:
-            lines.append("")
-            lines.append("### Twitter 动态表")
-            lines.extend(twitter_table)
-
-    if broker_reports:
-        lines.extend(["", "## 券商 AI 研报（10 大）", ""])
-        broker_table = _render_markdown_table(
-            ["券商", "日期", "分类", "标题", "分析师", "链接"],
-            [
-                [
-                    item.get("broker", ""),
-                    item.get("time", ""),
-                    item.get("category", ""),
-                    item.get("title", ""),
-                    item.get("analyst", ""),
-                    f"[详情]({item.get('link', '')})" if item.get("link") else "",
-                ]
-                for item in broker_reports[:12]
-            ],
-        )
-        if broker_table:
-            lines.extend(broker_table)
-
-    if False and isinstance(deep_dive, dict) and deep_dive.get("repo"):
-        lines.extend(["", "## GitHub 高增长项目深度解读", ""])
-        lines.append(
-            f"- 仓库：[{deep_dive.get('repo', '')}]({deep_dive.get('link', github_repo_link(deep_dive.get('repo', '')) )})"
-        )
-        lines.append(f"- 关注指标：⭐ {deep_dive.get('stars', 0)} / 7天增量 {deep_dive.get('delta7d', 0)}")
-        if deep_dive.get("problem"):
-            lines.append(f"- 解决问题：{deep_dive.get('problem')}")
-        if deep_dive.get("solution"):
-            lines.append(f"- 解决思路：{deep_dive.get('solution')}")
-        if deep_dive.get("architecture"):
-            lines.append(f"- 架构设计：{deep_dive.get('architecture')}")
-
-    record_policy = report.get("record_policy")
-    diff_detail = _build_structured_diff(report)
-    lines.extend(["", "## 合并与差异", "", "### 发生了什么"])
-    for item in diff_detail.get("changes", []):
-        lines.append(f"- {item}")
-    lines.extend(["", "### 业内含义"])
-    for item in diff_detail.get("industry", []):
-        lines.append(f"- {item}")
-    lines.extend(["", "### 新增信号"])
-    for item in diff_detail.get("signals", []):
-        lines.append(f"- {item}")
-    if isinstance(record_policy, dict):
-        lines.append(
-            "- 保留策略：最近{retain}条；清理旧记录 {removed_old} 条；当前保留 {remaining_records} 条；7天关联窗口 {merged_within_7d} 天；今日是否合并：{merged}。".format(
-                retain=record_policy.get("retain_last", MAX_RECORDS),
-                removed_old=record_policy.get("removed_old", 0),
-                remaining_records=record_policy.get("remaining_records", ""),
-                merged_within_7d=record_policy.get("merged_within_7d", RELATED_WINDOW_DAYS),
-                merged="是" if record_policy.get("merged", False) else "否",
-            )
-        )
-
-    lines.append("")
-    return "\n".join(lines)
-
-
-def format_html(report: Dict) -> str:
-    policy = report.get("record_policy")
-    source_list = report.get("source_channels", [])
-    source_html = " / ".join(source_list) or "OpenAI / Anthropic / INFOQ / GitHub / AG-UI / 微信 / Twitter / 券商研报"
-    priority_blocks = report.get("priorityChannelHighlights", [])
-    ai_highlights = report.get("aiHighlights", [])
-    skill_blocks = report.get("skillTop", {}) or {}
-    trend_projects = report.get("trendProjects", [])
-    wechat_top20 = report.get("wechatTop20", [])
-    twitter_updates = report.get("twitterUpdates", [])
-    broker_reports = report.get("brokerReports", [])
-    llm_models = report.get("llmModelReleases", [])
-    topic_summary = report.get("topicSummary", [])
-    focused_blocks = report.get("focusedSignals", [])
-    suggestions = report.get("suggestions", [])
-    deep_dive = report.get("githubDeepDive")
-    ag = report.get("ag_ui", {})
-
-    def _shorten(text: str, limit: int = 95) -> str:
-        txt = re.sub(r"\s+", " ", str(text).strip())
-        if not txt:
-            return ""
-        return txt if len(txt) <= limit else txt[: limit - 3].rstrip() + "..."
-
-    def _extract_highlights(text: str) -> List[str]:
-        if not text:
-            return []
-        low = text.lower()
-        clues = [
-            "agent",
-            "tool",
-            "mcp",
-            "orchestration",
-            "workflow",
-            "api",
-            "architecture",
-            "模型",
-            "推理",
-            "memory",
-            "retrieval",
-            "工具",
-            "多模态",
-            "调度",
-            "routing",
-            "编排",
-            "评估",
-            "fine-tune",
-            "微调",
-            "rag",
-            "reasoning",
-            "agentic",
-            "multi-agent",
-        ]
-        out = []
-        for c in clues:
-            if c in low and c not in out:
-                out.append(c)
-        return out[:4]
-
-    architecture_trace_order = [
-        ("Agent", ("agent", "agents", "agentic", "智能体", "assistant", "代理")),
-        ("Workflow", ("workflow", "work flow", "orchestration", "编排", "任务流", "工作流")),
-        ("RAG", ("rag", "retrieval", "检索", "检索增强", "检索增强生成")),
-        ("Memory", ("memory", "memory store", "记忆", "会话记忆", "记忆库")),
-        ("Router", ("router", "routing", "路由", "分发")),
-        ("Tools", ("tool", "tools", "tooling", "工具", "function", "tool calling")),
-        ("MCP", ("mcp",)),
-        ("API", ("api", "gateway", "接口", "endpoint")),
-        ("Vector DB", ("vector", "向量", "向量库")),
-        ("Policy", ("policy", "guardrail", "guardrails", "安全", "合规")),
-    ]
-
-    def _confidence_label(score: int) -> str:
-        if score >= 4:
-            return "高"
-        if score >= 2:
-            return "中"
-        if score >= 1:
-            return "低"
-        return "低"
-
-    def _build_architecture_signal_map(items: List[Dict[str, object]]) -> List[tuple[str, int]]:
-        scores = {label: 0 for label, _ in architecture_trace_order}
-        for item in items:
-            title = str(item.get("title", ""))
-            summary = str(item.get("summary", ""))
-            sections = item.get("architecture_sections")
-            section_text = " ".join([str(x) for x in sections]) if isinstance(sections, list) else ""
-            nodes = item.get("architecture_nodes", [])
-            node_text = " ".join([str(x) for x in nodes]) if isinstance(nodes, list) else ""
-            source_text = f"{title} {summary} {section_text} {node_text}".lower()
-            for label, keys in architecture_trace_order:
-                key_score = 0
-                for key in keys:
-                    if key in source_text:
-                        key_score += 1
-                if key_score:
-                    title_low = title.lower()
-                    if any(k in title_low for k in keys):
-                        key_score += 1
-                    if isinstance(sections, list) and any(key in section_text.lower() for key in keys):
-                        key_score += 1
-                    if isinstance(nodes, list) and any(key in node_text.lower() for key in keys):
-                        key_score += 1
-                    scores[label] += key_score
-        ordered = [(label, scores[label]) for label, _ in architecture_trace_order if scores.get(label, 0) > 0]
-        return ordered
-
-    tech_overview_blocks = []
-    merged_priority_items: List[Dict[str, object]] = []
-    for block in priority_blocks:
-        items = block.get("items", [])
-        if isinstance(items, list):
-            merged_priority_items.extend([i for i in items if isinstance(i, dict)])
-
-    if merged_priority_items:
-        summary_points: List[str] = []
-        generic_tech_labels = {"Agent", "Workflow", "Memory", "Tools", "API", "Policy"}
-        generic_tech_terms = {x.lower() for x in generic_tech_labels}
-
-        def _is_generic_tech_point(point: str) -> bool:
-            text = point.strip()
-            low = text.lower()
-            if low in generic_tech_terms:
-                return True
-            for label in generic_tech_labels:
-                if text.startswith(f"{label}（置信度："):
-                    return True
-            return len(text) <= 10 and low in {"agent", "workflow", "memory", "tools", "api", "policy"}
-
-        signal_points = _build_architecture_signal_map(merged_priority_items)
-        architecture_trace_points = [
-            f"{label}（置信度：{_confidence_label(score)}）"
-            for label, score in signal_points
-            if label and score >= 2 and label not in generic_tech_labels
-        ]
-        summary_points.extend(architecture_trace_points)
-
-        for item in merged_priority_items:
-            title = str(item.get("title", "")).strip()
-            summary = str(item.get("summary", "")).strip()
-            text = f"{title} {summary}"
-            for clue in _extract_highlights(text):
-                if clue not in summary_points and not _is_generic_tech_point(clue):
-                    summary_points.append(clue)
-
-        deduped_points: List[str] = []
-        for point in summary_points:
-            if point and point not in deduped_points and not _is_generic_tech_point(point):
-                deduped_points.append(point)
-        summary_points = deduped_points[:8]
-
-        if summary_points:
-            tech_points = "".join([f"<li>{escape(_shorten(point))}</li>" for point in summary_points])
-            tech_overview_blocks.append(
-                "<section class='card tech-card'>"
-                "<h3>Claude + OpenAI 技术概要</h3>"
-                "<div class='card-inner'>"
-                "<p>技术要点（仅展示可复用的框架 / SKILL / 能力线索）</p>"
-                f"<ul>{tech_points}</ul>"
-                "</div>"
-                "</section>"
-            )
 
     priority_html = []
-    for block in priority_blocks:
-        channel = escape(block.get("channel", "官方渠道"))
-        block_body = []
-        for item in block.get("items", []):
-            title = escape(item.get("title", ""))
-            source = escape(item.get("source", ""))
-            time = escape(str(item.get("time", "")))
-            summary = escape(str(item.get("summary", "")))
-            link = escape(str(item.get("link", "")))
-            if not title and not source and not link:
-                continue
-            item_html = f"<li><strong>{title}</strong>（{source}{(' | ' + time) if time else ''})"
-            if summary:
-                item_html += f"<br/>摘要：{summary}"
-            if link:
-                item_html += f"<br/><a href='{link}'>{link}</a>"
-            item_html += "</li>"
-            block_body.append(item_html)
-        if block_body:
-            priority_html.append(f"<h3>{channel}</h3><ul>{''.join(block_body)}</ul>")
 
     ai_html = []
     for item in ai_highlights:
@@ -5402,16 +4685,6 @@ def format_html(report: Dict) -> str:
             "<div style='display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;align-items:stretch;'>"
             + topic_cards_html
             + "</div></section>"
-        )
-    if tech_overview_blocks:
-        sections.append(
-            "<section class='card tech-wrap'><h2 class='main-title'>技术概要</h2>"
-            f"{''.join(tech_overview_blocks)}</section>"
-        )
-    if priority_html:
-        sections.append(
-            "<section class='card'><h2 class='main-title'>优先渠道（最近一周）：Claude Blog / OpenAI Research</h2>"
-            f"{''.join(priority_html)}</section>"
         )
     if ai_html:
         sections.append(
@@ -5657,6 +4930,187 @@ def _render_html_table(headers: List[str], rows: List[List[object]]) -> str:
         "</div>"
     )
 
+
+
+def format_markdown(report: Dict) -> str:
+    source_list = report.get("source_channels", [])
+    deep_dive = report.get("githubDeepDive")
+    llm_models = report.get("llmModelReleases", [])
+    topic_summary = report.get("topicSummary", [])
+    ai_highlights = report.get("aiHighlights", [])
+    skill_blocks = report.get("skillTop", {}) or {}
+    focused_blocks = report.get("focusedSignals", [])
+    ag = report.get("ag_ui", {})
+    trend_projects = report.get("trendProjects", [])
+    wechat_top20 = report.get("wechatTop20", [])
+    twitter_updates = report.get("twitterUpdates", [])
+    broker_reports = report.get("brokerReports", [])
+    record_policy = report.get("record_policy")
+
+    lines = [
+        f"# {report['title']}",
+        f"- 执行时间：{report['date']}（{report['timezone']}）",
+        f"- 数据源：{' / '.join(source_list) if source_list else 'OpenAI / Anthropic / INFOQ / GitHub / AG-UI / 微信 / Twitter / 券商研报'}",
+        "",
+    ]
+
+    if isinstance(deep_dive, dict) and deep_dive.get("repo"):
+        lines.extend(["## GitHub 高增长项目深度解读", ""])
+        lines.append(f"- 仓库：[{deep_dive.get('repo', '')}]({deep_dive.get('link', github_repo_link(deep_dive.get('repo', '')) )})")
+        lines.append(f"- {_github_deep_dive_recommendation(deep_dive)}")
+        lines.append(f"- 关注指标：⭐ {deep_dive.get('stars', 0)} / 7天增量 {deep_dive.get('delta7d', 0)}")
+        if deep_dive.get("problem"):
+            lines.append(f"- 解决问题：{deep_dive.get('problem')}")
+        if deep_dive.get("solution"):
+            lines.append(f"- 解决思路：{deep_dive.get('solution')}")
+        if deep_dive.get("architecture"):
+            lines.append(f"- 架构设计：{deep_dive.get('architecture')}")
+        lines.append("")
+
+    if llm_models:
+        lines.extend(["## LLM 模型发布与价格", ""])
+        table = _render_markdown_table(
+            ["公司", "最新模型", "版本", "发布时间", "输入/百万token", "输出/百万token", "整体/百万token", "升级概述", "来源"],
+            [[
+                item.get("company", ""), item.get("model", ""), item.get("version", ""), item.get("release_date", ""),
+                item.get("input_per_million", ""), item.get("output_per_million", ""), item.get("overall_per_million", ""),
+                item.get("summary", ""), item.get("source", ""),
+            ] for item in llm_models],
+        )
+        lines.extend(table)
+        lines.append("")
+
+    if topic_summary:
+        lines.extend(["## 今日新词汇", ""])
+        table = _render_markdown_table(
+            ["新词汇", "是什么", "为什么值得关注", "首次出现", "出处"],
+            [[
+                item.get("term", ""), item.get("definition", ""), item.get("why", ""), item.get("firstSeen", ""),
+                f"[来源]({item.get('sourceLink', '')})" if item.get("sourceLink") else "",
+            ] for item in topic_summary[:3]],
+        )
+        lines.extend(table)
+        lines.append("")
+
+    if ai_highlights:
+        lines.extend(["## AI 信息", ""])
+        for item in ai_highlights:
+            title = item.get("title", "")
+            if not title:
+                continue
+            lines.extend([
+                f"### {title}",
+                f"- 来源：{item.get('source', '')}",
+                f"- 时间：{item.get('time', '')}",
+                f"- 链接：{item.get('link', '')}",
+                f"- 核心：{item.get('coreIdea', '')}",
+                "",
+            ])
+
+    if skill_blocks:
+        lines.append("## 明细 Star 的 SKILL（Top3）")
+        for key, block in skill_blocks.items():
+            lines.append(f"### {block.get('title', key)}")
+            if block.get("description"):
+                lines.append(f"- 说明：{block.get('description')}")
+            if block.get("status"):
+                lines.append(f"- 状态：{block.get('status')}")
+            for it in block.get("items", [])[:3]:
+                repo = it.get("repo", "N/A")
+                link = it.get("link", github_repo_link(repo))
+                source = it.get("source", "GitHub")
+                lines.append(f"- [{repo}]({link})｜来源：{source}｜当前星数 `{it.get('currentStars', 0)}`｜7天增量 `{it.get('delta7d', 0)}`｜{it.get('highlights', it.get('why', ''))}")
+            lines.append("")
+
+    if focused_blocks:
+        lines.extend(["## 定向细分领域追踪（AU- UI / AI地图 / AI检索与RAG / AI生图 / Agent Team）", ""])
+        for block in focused_blocks:
+            lines.append(f"### {block.get('field', '')}")
+            for item in block.get("items", [])[:4]:
+                title = item.get("title", "")
+                if not title:
+                    continue
+                source = item.get("source", "")
+                link = item.get("link", "")
+                time = item.get("time", "")
+                snippet = item.get("snippet", "")
+                lines.append(f"- **{title}**（{source}）{('，' + time) if time else ''}")
+                if snippet:
+                    lines.append(f"  - {snippet}")
+                if link:
+                    lines.append(f"  - 链接：{link}")
+            lines.append("")
+
+    if ag:
+        lines.extend(["## AG-UI", f"- 仓库：[{ag.get('repo', '')}]({ag.get('link', github_repo_link('ag-ui-protocol/ag-ui'))})"])
+        if ag.get("stars") not in (None, ""):
+            lines.append(f"- 当前星标：{ag.get('stars', 'N/A')}")
+        if ag.get("description"):
+            lines.append(f"- 描述：{ag.get('description', '')}")
+        lines.append("")
+
+    if trend_projects:
+        lines.extend(["## GitHub 周度项目（快速上升）", ""])
+        table = _render_markdown_table(
+            ["排名", "仓库", "定位", "解决问题", "应用场景", "背景", "热度"],
+            [[
+                p.get("rank", idx), f"[{p.get('repo', 'N/A')}]({p.get('link', github_repo_link(p.get('repo', '')) )})",
+                _github_project_profile(p)["positioning"], _github_project_profile(p)["problem"],
+                _github_project_profile(p)["scenario"], _github_project_profile(p)["background"], _github_project_profile(p)["heat"],
+            ] for idx, p in enumerate(trend_projects, start=1)],
+        )
+        lines.extend(table)
+        lines.append("")
+
+    if wechat_top20:
+        lines.extend(["## WeChat Top20 AI 公告号", ""])
+        table = _render_markdown_table(
+            ["排名", "公众号", "ID", "内容概述", "新榜指数", "平均阅读数", "链接"],
+            [[idx, item.get("accountName", item.get("title", "")), item.get("accountId", ""), _wechat_account_summary(item), item.get("score", ""), item.get("avgReads", ""), item.get("link", "")] for idx, item in enumerate(wechat_top20[:20], start=1)],
+        )
+        lines.extend(table)
+        lines.append("")
+
+    if twitter_updates:
+        lines.extend(["## Twitter 美国科技公司 AI 动态", ""])
+        table = _render_markdown_table(
+            ["账号", "标题", "时间", "链接"],
+            [[item.get("source", "Twitter"), item.get("title", ""), item.get("time", ""), item.get("link", "")] for item in twitter_updates[:12]],
+        )
+        lines.extend(table)
+        lines.append("")
+
+    if broker_reports:
+        lines.extend(["## 券商 AI 研报（10 大）", ""])
+        table = _render_markdown_table(
+            ["券商", "日期", "分类", "标题", "分析师", "链接"],
+            [[item.get("broker", ""), item.get("time", ""), item.get("category", ""), item.get("title", ""), item.get("analyst", ""), f"[详情]({item.get('link', '')})" if item.get("link") else ""] for item in broker_reports[:12]],
+        )
+        lines.extend(table)
+        lines.append("")
+
+    diff_detail = _build_structured_diff(report)
+    lines.extend(["## 合并与差异", "", "### 发生了什么"])
+    for item in diff_detail.get("changes", []):
+        lines.append(f"- {item}")
+    lines.extend(["", "### 业内含义"])
+    for item in diff_detail.get("industry", []):
+        lines.append(f"- {item}")
+    lines.extend(["", "### 新增信号"])
+    for item in diff_detail.get("signals", []):
+        lines.append(f"- {item}")
+    if isinstance(record_policy, dict):
+        lines.append(
+            "- 保留策略：最近{retain}条；清理旧记录 {removed_old} 条；当前保留 {remaining_records} 条；7天关联窗口 {merged_within_7d} 天；今日是否合并：{merged}。".format(
+                retain=record_policy.get("retain_last", MAX_RECORDS),
+                removed_old=record_policy.get("removed_old", 0),
+                remaining_records=record_policy.get("remaining_records", ""),
+                merged_within_7d=record_policy.get("merged_within_7d", RELATED_WINDOW_DAYS),
+                merged="是" if record_policy.get("merged", False) else "否",
+            )
+        )
+    lines.append("")
+    return "\n".join(lines)
 
 def collect_report_catalog() -> List[Dict[str, str]]:
     if not REPORT_OUTPUT_DIR.exists():
