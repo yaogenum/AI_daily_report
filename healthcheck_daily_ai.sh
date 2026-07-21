@@ -7,7 +7,8 @@ STATE_FILE="$LOG_DIR/daily_ai_healthcheck.state"
 HEALTH_LOG="$LOG_DIR/daily_ai_healthcheck.log"
 TODAY="$(date '+%Y-%m-%d')"
 CURRENT_HOUR="$(date '+%H')"
-TODAY_REPORT="$ROOT/report/daily_ai_brief_${TODAY}.md"
+TODAY_REPORT="$ROOT/report/daily_ai_brief_${TODAY}.html"
+HEALTHCHECK_SEND_EMAIL="${DAILY_AI_HEALTHCHECK_SEND_EMAIL:-0}"
 BRIEF_ERR="$LOG_DIR/launchd_daily_ai_brief.err.log"
 RETRY_ERR="$LOG_DIR/launchd_daily_ai_email_retry.err.log"
 export PATH="/usr/local/bin:/opt/homebrew/bin:/usr/bin:/bin:/usr/sbin:/sbin"
@@ -59,6 +60,10 @@ scan_new_errors() {
 send_alert() {
   subject="$1"
   body="$2"
+  if [ "$HEALTHCHECK_SEND_EMAIL" != "1" ]; then
+    log "healthcheck alert email disabled subject=$subject"
+    return 0
+  fi
   /usr/bin/python3 - "$subject" "$body" <<'PY'
 import re
 import smtplib

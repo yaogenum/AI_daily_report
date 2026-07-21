@@ -2,7 +2,7 @@
 """
 Daily brief runner:
  - Fetches AI signal headlines from public sources.
- - Writes one markdown report and updates historical state.
+ - Writes one HTML report and updates historical state.
  - Keeps last 14 historical records.
  - Merges today's report into any same-topic report in the previous 7 days.
 """
@@ -114,6 +114,7 @@ class DailyBriefTimeout(TimeoutError):
 STATE_FILE = Path(__file__).with_name("daily_ai_brief_state.json")
 REPORT_OUTPUT_DIR = Path(__file__).with_name("report")
 MAX_RECORDS = 14
+REPORT_FILE_RETENTION_DAYS = 30
 RELATED_WINDOW_DAYS = 7
 DAILY_AI_BRIEF_CATCHUP_DAYS = max(1, _read_int_env("DAILY_AI_BRIEF_CATCHUP_DAYS", "BACKFILL_DAYS", default=3))
 DAILY_AI_BRIEF_MAX_RUNTIME_SECONDS = max(
@@ -5121,7 +5122,6 @@ def collect_report_catalog() -> List[Dict[str, str]]:
         if not match:
             continue
         date_key = match.group(1)
-        md_file = REPORT_OUTPUT_DIR / f"daily_ai_brief_{date_key}.md"
         title = f"AI 研究日报（{date_key}）"
         try:
             with html_file.open("r", encoding="utf-8") as f:
@@ -5138,7 +5138,6 @@ def collect_report_catalog() -> List[Dict[str, str]]:
                 "date": date_key,
                 "title": title,
                 "html": html_file.name,
-                "md": md_file.name if md_file.exists() else "",
             }
         )
     return out
@@ -5434,11 +5433,7 @@ def build_reports_portal_html(reports: List[Dict[str, str]]) -> str:
       selectedDate.textContent = `当前日期：${{date}}`;
       selectedMeta.textContent = item.title || '';
       previewHint.textContent = '已加载 HTML：' + item.html;
-      if (item.md) {{
-        mdLinkWrap.innerHTML = `<a href=\"${{item.md}}\" target=\"_blank\">打开 Markdown</a>`;
-      }} else {{
-        mdLinkWrap.textContent = '当前日期未保存 Markdown 文件';
-      }}
+      mdLinkWrap.textContent = '';
     }}
 
     function setActive(button) {{
@@ -5508,6 +5503,38 @@ def prune_history(history: List[Dict]) -> Dict:
 def _safe_parse_report_date(filename: str) -> str | None:
     match = re.match(r"^daily_ai_brief_(\d{4}-\d{2}-\d{2})\.(md|html)$", filename)
     return match.group(1) if match else None
+
+
+def prune_report_output_files(reference_dt: datetime) -> Dict[str, object]:
+    cutoff_date = reference_dt.date() - timedelta(days=REPORT_FILE_RETENTION_DAYS)
+    removed: List[str] = []
+    errors: List[Dict[str, str]] = []
+    REPORT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
+    candidates = sorted(REPORT_OUTPUT_DIR.glob("daily_ai_brief_*.md")) + sorted(
+        REPORT_OUTPUT_DIR.glob("daily_ai_brief_*.html")
+    )
+    for path in candidates:
+        date_str = _safe_parse_report_date(path.name)
+        if not date_str:
+            continue
+        try:
+            report_date = datetime.fromisoformat(date_str).date()
+        except Exception as exc:
+            errors.append({"file": str(path), "error": str(exc)})
+            continue
+        if report_date >= cutoff_date:
+            continue
+        try:
+            path.unlink()
+            removed.append(path.name)
+        except Exception as exc:
+            errors.append({"file": str(path), "error": str(exc)})
+    return {
+        "cutoff_date": cutoff_date.isoformat(),
+        "removed": removed,
+        "removed_count": len(removed),
+        "errors": errors,
+    }
 
 
 def archive_daily_brief_files(reference_dt: datetime) -> Dict[str, object]:
@@ -5633,16 +5660,13 @@ def run() -> Dict:
         generated_outputs = []
         REPORT_OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
         for report in generated_reports:
-            md = format_markdown(report)
             html = format_html(report)
-            out_file = REPORT_OUTPUT_DIR / f"daily_ai_brief_{report['date']}.md"
             out_html_file = REPORT_OUTPUT_DIR / f"daily_ai_brief_{report['date']}.html"
-            with out_file.open("w", encoding="utf-8") as f:
-                f.write(md)
             with out_html_file.open("w", encoding="utf-8") as f:
                 f.write(html)
-            generated_outputs.append({"date": report["date"], "markdown": str(out_file), "html": str(out_html_file)})
+            generated_outputs.append({"date": report["date"], "html": str(out_html_file)})
 
+        report_file_prune = prune_report_output_files(now)
         report_catalog = collect_report_catalog()
         report_portal_html = build_reports_portal_html(report_catalog)
         portal_file = REPORT_OUTPUT_DIR / "daily_ai_calendar_portal.html"
@@ -5668,12 +5692,8 @@ def run() -> Dict:
 
         sent_md = format_markdown(sent_report)
         sent_html = format_html(sent_report)
-        out_file = REPORT_OUTPUT_DIR / f"daily_ai_brief_{sent_report['date']}.md"
         out_html_file = REPORT_OUTPUT_DIR / f"daily_ai_brief_{sent_report['date']}.html"
         if not timeout_reason:
-            if not out_file.exists():
-                with out_file.open("w", encoding="utf-8") as f:
-                    f.write(sent_md)
             if not out_html_file.exists():
                 with out_html_file.open("w", encoding="utf-8") as f:
                     f.write(sent_html)
@@ -5715,7 +5735,7 @@ def run() -> Dict:
             "html": sent_html,
             "email": email_result,
             "state_file": str(STATE_FILE),
-            "output_file": str(out_file),
+            "output_file": str(out_html_file),
             "output_html_file": str(out_html_file),
             "portal_html_file": str(portal_file),
             "portal_html_file_legacy": str(legacy_portal_file),
