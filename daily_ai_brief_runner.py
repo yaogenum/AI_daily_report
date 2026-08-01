@@ -142,6 +142,9 @@ SOURCE_URLS = {
     "github_trend_json_weekly": "https://raw.githubusercontent.com/isboyjc/github-trending-api/main/data/weekly/all.json",
     "claude_blog": "https://claude.com/blog",
     "openai_research": "https://openai.com/zh-Hant-HK/research/index/",
+    "arxiv_ai_papers": "https://export.arxiv.org/api/query?search_query=cat%3Acs.AI+OR+cat%3Acs.CL+OR+cat%3Acs.LG&start=0&max_results=40&sortBy=submittedDate&sortOrder=descending",
+    "nature_machine_intelligence_rss": "https://feeds.nature.com/natmachintell/news-and-comment",
+    "science_latest_rss": "https://www.science.org/action/showFeed?type=etoc&feed=rss&jc=science",
 }
 
 # Avoid repeatedly hitting the same dead Twitter RSS mirror for every account
@@ -189,6 +192,7 @@ PRIORITY_CHANNELS = [
 ]
 PRIORITY_CHANNEL_LOOKBACK_DAYS = 7
 PRIORITY_CHANNEL_MAX_SUMMARY_CHARS = 220
+AI_PAPER_LOOKBACK_DAYS = 3
 GITHUB_TREND_MIN_STARS = max(0, _read_int_env("DAILY_AI_BRIEF_GITHUB_TREND_MIN_STARS", "GITHUB_TREND_MIN_STARS", default=1200))
 GITHUB_TREND_MIN_DELTA = max(0, _read_int_env("DAILY_AI_BRIEF_GITHUB_TREND_MIN_DELTA", "GITHUB_TREND_MIN_DELTA", default=180))
 GITHUB_TREND_MIN_DELTA_PERCENT = max(0, _read_int_env("DAILY_AI_BRIEF_GITHUB_TREND_MIN_DELTA_PERCENT", "GITHUB_TREND_MIN_DELTA_PERCENT", default=4))
@@ -943,6 +947,14 @@ EMAIL_API_PROVIDER = _read_env_first("DAILY_AI_BRIEF_EMAIL_API_PROVIDER", "EMAIL
 EMAIL_OUTBOX_DIR = Path(__file__).with_name("daily_ai_unsent")
 EMAIL_SMTP_CHECK_TIMEOUT = float(_read_env_first("DAILY_AI_BRIEF_SMTP_CHECK_TIMEOUT", default="2.5"))
 EMAIL_QUEUE_ON_FAIL = _read_env_first("DAILY_AI_BRIEF_QUEUE_ON_FAIL", "EMAIL_QUEUE_ON_FAIL", default="1").lower() in ("1", "true", "yes", "on")
+FEISHU_ENABLED = _read_env_first("DAILY_AI_BRIEF_FEISHU_ENABLED", default="1").lower() in ("1", "true", "yes", "on")
+FEISHU_CHAT_ID = _read_env_first("DAILY_AI_BRIEF_FEISHU_CHAT_ID", "FEISHU_CHAT_ID", default="")
+FEISHU_AGENT_BIN = _read_env_first(
+    "DAILY_AI_BRIEF_FEISHU_AGENT_BIN",
+    "FEISHU_AGENT_BIN",
+    default="/Users/jiubao/Desktop/codex_workplace/feishu-deepagent/.venv/bin/feishu-agent",
+)
+FEISHU_TIMEOUT_SECONDS = max(5, _read_int_env("DAILY_AI_BRIEF_FEISHU_TIMEOUT_SECONDS", default=45))
 
 SKILL_CATEGORIES = {
     "ai_engineering": {
@@ -1257,7 +1269,7 @@ def _load_json_file(path: str) -> object:
         return None
 
 
-def _collect_from_priority_snapshot(source_key: str, now: datetime) -> List[Dict[str, str]]:
+def _collect_from_priority_snapshot(source_key: str, now: datetime, lookback_days: int | None = None) -> List[Dict[str, str]]:
     payload = _load_json_file(PRIORITY_CHANNEL_BROWSER_SNAPSHOT_PATH)
     if not isinstance(payload, dict):
         return []
@@ -1273,7 +1285,7 @@ def _collect_from_priority_snapshot(source_key: str, now: datetime) -> List[Dict
         if not dt:
             # 无法确定发布时间时，避免把不确定日期的内容误认定为近期内容
             continue
-        if dt < now - timedelta(days=PRIORITY_CHANNEL_LOOKBACK_DAYS):
+        if dt < now - timedelta(days=lookback_days or PRIORITY_CHANNEL_LOOKBACK_DAYS):
             continue
         raw_title = str(item.get("title", "")).strip()
         raw_summary = str(item.get("summary", "")).strip()
@@ -1383,7 +1395,18 @@ def _extract_page_title(html_text: str, fallback: str = "Untitled") -> str:
         parsed = strip_html(match.group(1))
         if parsed:
             return parsed
-    return fallback
+    if fallback:
+        return fallback
+
+    # Claude Blog 是日报的核心官方渠道。官网和站内检索同时不可达时，保留最近
+    # 一次已验证快照（最长 90 天），并明确标注历史快照，避免它被静默从日报移除。
+    snapshot = _collect_from_priority_snapshot(
+        "claude_blog", now=now, lookback_days=90
+    )
+    for item in snapshot:
+        item["source"] = "Claude 官方博文（历史快照，官网暂不可达）"
+        item["translate"] = "官网与站内检索暂不可达，展示最近已验证 Claude Blog 快照"
+    return snapshot[:conf.get("max_items", 6)]
 
 
 def _extract_page_summary(html_text: str) -> str:
@@ -1841,12 +1864,223 @@ def parse_claude_blog_recent_week() -> List[Dict[str, str]]:
     conf = next((x for x in PRIORITY_CHANNELS if x["key"] == "claude_blog"), None)
     if not conf:
         return []
-    return _collect_priority_channel_articles(
+    articles = _collect_priority_channel_articles(
         source_name=conf["source"],
         source_url=SOURCE_URLS["claude_blog"],
         max_items=conf.get("max_items", 6),
         is_candidate=lambda href, title: "/blog/" in href.lower() and href.lower().startswith("https://claude.com/"),
     )
+    if articles:
+        return articles
+
+    # claude.com 有时会在网络边界超时；用站内检索补偿，不把 Anthropic 的其他页面
+    # 混入 Claude Blog。检索结果仍以 claude.com/blog 链接为唯一准入条件。
+    fallback: List[Dict[str, str]] = []
+    for item in _collect_ddg_search("site:claude.com/blog Claude agent coding"):
+        link = str(item.get("link", "")).strip()
+        title = str(item.get("title", "")).strip()
+        if not link.startswith("https://claude.com/blog/") or not title:
+            continue
+        fallback.append(
+            {
+                "title": title,
+                "title_zh": title,
+                "title_original": title,
+                "summary": str(item.get("snippet", "")).strip()[:PRIORITY_CHANNEL_MAX_SUMMARY_CHARS],
+                "summary_original": str(item.get("snippet", "")).strip(),
+                "architecture_points": _extract_architecture_highlights(f"{title} {item.get('snippet', '')}"),
+                "architecture_nodes": _derive_architecture_nodes(title, str(item.get("snippet", ""))),
+                "architecture_sections": [],
+                "architecture_images": [],
+                "link": link,
+                "source": "Claude 官方博文（站内检索补偿）",
+                "time": str(item.get("time", "")) or "发布时间待官网页面恢复确认",
+                "translate": "官网直连失败，已由 Claude Blog 站内检索补充",
+            }
+        )
+        if len(fallback) >= conf.get("max_items", 6):
+            break
+    return fallback
+
+
+def _paper_focus_fields(title: str, summary: str) -> tuple[str, str, str]:
+    text = f"{title} {summary}".lower()
+    if any(k in text for k in ("agent", "agentic", "tool use", "tool-use")):
+        return (
+            "智能体任务执行与工具调用方法",
+            "为复杂任务提供可复现的分解、调用或评估机制。",
+            "解决 Agent 在长链路任务中的规划、执行和可靠性问题。",
+        )
+    if any(k in text for k in ("reasoning", "reinforcement learning", "rl", "q-function")):
+        return (
+            "推理或强化学习训练方法",
+            "改善模型在决策、泛化或训练效率上的可验证表现。",
+            "解决现有训练流程难以稳定提升复杂决策能力的问题。",
+        )
+    if any(k in text for k in ("multimodal", "vision", "image", "video")):
+        return (
+            "多模态理解与生成方法",
+            "扩展模型对图像、视频等非文本信息的处理能力。",
+            "解决跨模态感知、推理或生成的性能与对齐问题。",
+        )
+    if any(k in text for k in ("language model", "llm", "transformer", "world model")):
+        return (
+            "大模型能力或世界模型研究",
+            "为通用模型的表示、推理或交互能力提供新方法和实证。",
+            "解决模型在理解、预测或泛化上的关键能力缺口。",
+        )
+    return (
+        "AI 方法与应用研究",
+        "提供可验证的模型、算法或实验结果，作为后续跟踪线索。",
+        "解决特定任务中的效果、成本、可靠性或可解释性问题。",
+    )
+
+
+def _ai_trend_relevance(title: str, summary: str, categories: str = "") -> int:
+    """只保留能反映近期 AI 产品、模型或研究路线的论文，而非泛 CS 条目。"""
+    text = f"{title} {summary} {categories}".lower()
+    signals = {
+        "agent": 4, "agentic": 4, "language model": 4, "llm": 4,
+        "foundation model": 4, "reasoning": 3, "multimodal": 3,
+        "world model": 3, "retrieval": 3, "rag": 3, "tool use": 3,
+        "tool-use": 3, "reinforcement learning": 2, "alignment": 3,
+        "evaluation": 2, "benchmark": 2, "inference": 2, "serving": 2,
+        "transformer": 2, "diffusion": 2, "vision-language": 3,
+        "robot": 2, "embodied": 3, "generative ai": 3,
+    }
+    return sum(weight for term, weight in signals.items() if term in text)
+
+
+def _recent_reported_paper_keys(history: List[Dict] | None, as_of: datetime) -> set[str]:
+    """返回过去三天已进入日报的论文键，避免重复进入邮件与飞书内容。"""
+    known: set[str] = set()
+    cutoff = as_of.date() - timedelta(days=AI_PAPER_LOOKBACK_DAYS)
+    for report in history or []:
+        if not isinstance(report, dict):
+            continue
+        try:
+            report_date = datetime.fromisoformat(str(report.get("date", ""))).date()
+        except ValueError:
+            continue
+        if report_date < cutoff or report_date >= as_of.date():
+            continue
+        for paper in report.get("latestAiPapers", []) or []:
+            if not isinstance(paper, dict):
+                continue
+            key = str(paper.get("link", "")).strip().lower() or str(paper.get("title", "")).strip().lower()
+            if key:
+                known.add(key)
+    return known
+
+
+def collect_latest_ai_papers(
+    as_of: datetime | None = None,
+    history: List[Dict] | None = None,
+    max_items: int = 10,
+) -> List[Dict[str, str]]:
+    """从 arXiv 官方 Atom API 选取近期 AI 论文，避免把普通 CS 论文混入日报。"""
+    now = (as_of or datetime.now().astimezone()).astimezone(timezone.utc)
+    reported_keys = _recent_reported_paper_keys(history, now)
+    text = fetch_url(SOURCE_URLS["arxiv_ai_papers"], timeout=20)
+    if text.startswith("__ERROR__"):
+        return []
+    ranked: List[Dict[str, object]] = []
+    for match in re.finditer(r"<entry>(.*?)</entry>", text, flags=re.I | re.S):
+        entry = match.group(1)
+        title_match = re.search(r"<title[^>]*>(.*?)</title>", entry, flags=re.I | re.S)
+        summary_match = re.search(r"<summary[^>]*>(.*?)</summary>", entry, flags=re.I | re.S)
+        link_match = re.search(r"<link[^>]+href=[\"']([^\"']+)[\"'][^>]*rel=[\"']alternate[\"']", entry, flags=re.I | re.S)
+        if not link_match:
+            link_match = re.search(r"<id>(.*?)</id>", entry, flags=re.I | re.S)
+        published_match = re.search(r"<published>(.*?)</published>", entry, flags=re.I | re.S)
+        title = strip_html(title_match.group(1) if title_match else "").strip()
+        summary = re.sub(r"\s+", " ", strip_html(summary_match.group(1) if summary_match else "")).strip()
+        link = strip_html(link_match.group(1) if link_match else "").replace("http://", "https://").strip()
+        published = strip_html(published_match.group(1) if published_match else "").strip()
+        published_dt = _parse_time(published)
+        if not title or not link or not published_dt or published_dt < now - timedelta(days=AI_PAPER_LOOKBACK_DAYS):
+            continue
+        if link.lower() in reported_keys or title.lower() in reported_keys:
+            continue
+        authors = [strip_html(x) for x in re.findall(r"<author>.*?<name>(.*?)</name>.*?</author>", entry, flags=re.I | re.S)]
+        categories = re.findall(r"<category[^>]+term=[\"']([^\"']+)", entry, flags=re.I | re.S)
+        relevance = _ai_trend_relevance(title, summary, ", ".join(categories))
+        if relevance < 2:
+            continue
+        recency = max(0, 7 - (now.date() - published_dt.date()).days)
+        definition, value, problem = _paper_focus_fields(title, summary)
+        ranked.append(
+            {
+                "title": title,
+                "link": link,
+                "published": published_dt.date().isoformat(),
+                "authors": "、".join(authors[:4]) + (" 等" if len(authors) > 4 else ""),
+                "categories": ", ".join(categories[:3]),
+                "definition": definition,
+                "value": value,
+                "problem": problem,
+                "summary": summary[:260],
+                "score": relevance * 20 + recency,
+            }
+        )
+    ranked.extend(collect_peer_reviewed_ai_papers(as_of=now, reported_keys=reported_keys))
+    ranked.sort(key=lambda item: (int(item["score"]), str(item["published"])), reverse=True)
+    return [dict(item) for item in ranked[:max_items]]
+
+
+def collect_peer_reviewed_ai_papers(
+    as_of: datetime | None = None,
+    reported_keys: set[str] | None = None,
+) -> List[Dict[str, object]]:
+    """收集 Nature Machine Intelligence 与 Science 的 AI 论文/研究报道。
+
+    Science 的 RSS 同时含目录和研究报道，使用 AI 关键词过滤；仅接受可解析的近期
+    发布日期，避免把历史专题误列为最新论文。
+    """
+    now = (as_of or datetime.now().astimezone()).astimezone(timezone.utc)
+    reported_keys = reported_keys or set()
+    sources = [
+        (SOURCE_URLS["nature_machine_intelligence_rss"], "Nature Machine Intelligence"),
+        (SOURCE_URLS["science_latest_rss"], "Science / AAAS"),
+    ]
+    keywords = ["artificial intelligence", "machine learning", "language model", "llm", "agent", "robot", "neural", "deep learning"]
+    out: List[Dict[str, object]] = []
+    for feed_url, source_name in sources:
+        items = parse_rss_feed_signals_custom(
+            url=feed_url,
+            source_name=source_name,
+            keyword_filter=keywords,
+            max_items=10,
+        )
+        for item in items:
+            published_dt = _parse_time(str(item.get("time", "")))
+            if not published_dt or published_dt < now - timedelta(days=AI_PAPER_LOOKBACK_DAYS):
+                continue
+            title = str(item.get("title", "")).strip()
+            if not title:
+                continue
+            link = str(item.get("link", feed_url)).strip()
+            if link.lower() in reported_keys or title.lower() in reported_keys:
+                continue
+            relevance = _ai_trend_relevance(title, str(item.get("raw", "")))
+            if relevance < 2:
+                continue
+            definition, value, problem = _paper_focus_fields(title, str(item.get("raw", "")))
+            out.append(
+                {
+                    "title": title,
+                    "link": link,
+                    "published": published_dt.date().isoformat(),
+                    "authors": source_name,
+                    "categories": "同行评审期刊 / 研究报道",
+                    "definition": definition,
+                    "value": value,
+                    "problem": problem,
+                    "summary": str(item.get("raw", ""))[:260],
+                    "score": 100 + relevance * 20 + max(0, AI_PAPER_LOOKBACK_DAYS - (now.date() - published_dt.date()).days),
+                }
+            )
+    return out
 
 
 def parse_openai_research_recent_week() -> List[Dict[str, str]]:
@@ -2863,9 +3097,14 @@ def build_github_deep_dive_project(
     if not repo:
         return None
 
+    # 趋势源的 7 天增量和 GitHub 仓库 API 的总星数是两类数据：后者不提供
+    # 周增量。过去直接 update 会把可信趋势值覆盖成 API 兜底值 0。
+    trend_delta = _safe_int(target.get("delta7d", 0))
     meta = fetch_repo_meta(repo) if repo else target
     if meta:
         target.update(meta)
+    if trend_delta > 0:
+        target["delta7d"] = trend_delta
     readme = _fetch_github_readme_text(repo)
     if not readme:
         readme = str(target.get("description", ""))
@@ -2881,7 +3120,7 @@ def build_github_deep_dive_project(
         "repo": repo,
         "link": target.get("link", github_repo_link(repo)),
         "stars": _safe_int(target.get("currentStars", 0)),
-        "delta7d": _safe_int(target.get("delta7d", 0)),
+        "delta7d": _safe_int(target.get("delta7d", 0)) or "待积累",
         "problem": _infer_solution_from_text(repo, description, source_text, mode="problem"),
         "solution": _infer_solution_from_text(repo, description, readme, mode="solution"),
         "architecture": _build_architecture_from_text(repo, source_text, readme),
@@ -3790,6 +4029,141 @@ def send_report_email(
     return {"status": "error", "reason": final_reason, "attempted": attempted, "email_config": _email_config_snapshot()}
 
 
+def _trim_text(value: object, limit: int = 90) -> str:
+    text = re.sub(r"\s+", " ", strip_html(unescape(str(value or "")))).strip()
+    if len(text) <= limit:
+        return text
+    return text[: max(0, limit - 1)].rstrip() + "…"
+
+
+def build_feishu_ai_brief(report: Dict[str, object], output_file: str, email_result: Dict[str, object]) -> str:
+    date = str(report.get("date", "") or datetime.now().date().isoformat())
+    title = str(report.get("title", "") or "AI 研究日报")
+    lines = [
+        f"**{title}｜飞书 AI 简报**",
+        f"- 日期：{date}",
+        f"- 邮件：已发送给 {', '.join(email_result.get('recipients', []) or [])}",
+    ]
+
+    highlights = [x for x in report.get("aiHighlights", []) if isinstance(x, dict)]
+    if highlights:
+        lines.append("")
+        lines.append("**核心快讯**")
+        for item in highlights[:3]:
+            item_title = _trim_text(item.get("title"), 80)
+            core = _trim_text(item.get("core") or item.get("summary") or item.get("description"), 90)
+            link = str(item.get("link", "") or "").strip()
+            if link:
+                lines.append(f"- [{item_title}]({link})：{core}")
+            else:
+                lines.append(f"- {item_title}：{core}")
+
+    models = [x for x in report.get("llmModelReleases", []) if isinstance(x, dict)]
+    if models:
+        lines.append("")
+        lines.append("**模型发布/价格**")
+        for item in models[:3]:
+            company = _trim_text(item.get("company"), 24)
+            model = _trim_text(item.get("model") or item.get("latestModel") or item.get("version"), 48)
+            summary = _trim_text(item.get("upgrade") or item.get("summary"), 60)
+            lines.append(f"- {company}：{model}，{summary}")
+
+    projects = [x for x in report.get("trendProjects", []) if isinstance(x, dict)]
+    if projects:
+        lines.append("")
+        lines.append("**GitHub 高增长项目**")
+        for item in projects[:3]:
+            repo = _trim_text(item.get("repo"), 60)
+            link = str(item.get("link", "") or "").strip()
+            stars = item.get("currentStars", "")
+            delta = item.get("delta7d", "")
+            desc = _trim_text(
+                item.get("positioning") or item.get("description") or item.get("shortDescription"),
+                70,
+            )
+            label = f"[{repo}]({link})" if link else repo
+            lines.append(f"- {label}：{desc}（总星 {stars}，7天 +{delta}）")
+
+    brokers = [x for x in report.get("brokerReports", []) if isinstance(x, dict)]
+    if brokers:
+        lines.append("")
+        lines.append("**行业/券商信号**")
+        for item in brokers[:3]:
+            org = _trim_text(item.get("broker") or item.get("source"), 24)
+            topic = _trim_text(item.get("title"), 90)
+            lines.append(f"- {org}：{topic}")
+
+    diff = report.get("diffSummary")
+    if isinstance(diff, dict):
+        signals = diff.get("signals") or diff.get("industry") or diff.get("changes") or []
+        if signals:
+            lines.append("")
+            lines.append("**今日变化**")
+            for item in signals[:3]:
+                lines.append(f"- {_trim_text(item, 90)}")
+    elif diff:
+        lines.append("")
+        lines.append(f"**今日变化**：{_trim_text(diff, 120)}")
+
+    if output_file:
+        lines.append("")
+        lines.append(f"HTML：`{output_file}`")
+    return "\n".join(lines)[:6000]
+
+
+def send_feishu_ai_brief(report: Dict[str, object], output_file: str, email_result: Dict[str, object]) -> Dict[str, object]:
+    if not FEISHU_ENABLED:
+        return {"status": "skip", "reason": "DAILY_AI_BRIEF_FEISHU_ENABLED 未开启"}
+    if email_result.get("status") != "sent":
+        return {"status": "skip", "reason": "邮件未成功发送，跳过飞书简报"}
+    if not FEISHU_CHAT_ID:
+        return {"status": "skip", "reason": "未配置 DAILY_AI_BRIEF_FEISHU_CHAT_ID"}
+    agent_bin = Path(FEISHU_AGENT_BIN)
+    if not agent_bin.exists():
+        return {"status": "skip", "reason": f"feishu-agent 不存在：{agent_bin}"}
+    try:
+        markdown = build_feishu_ai_brief(report, output_file, email_result)
+        date = str(report.get("date", "") or datetime.now().date().isoformat())
+        proc = subprocess.run(
+            [
+                str(agent_bin),
+                "send",
+                "--chat-id",
+                FEISHU_CHAT_ID,
+                "--markdown",
+                markdown,
+                "--idempotency-key",
+                f"daily-ai-brief-feishu-summary-{date}",
+            ],
+            cwd=str(Path(__file__).resolve().parent),
+            capture_output=True,
+            text=True,
+            timeout=FEISHU_TIMEOUT_SECONDS,
+        )
+        stdout = (proc.stdout or "").strip()
+        stderr = (proc.stderr or "").strip()
+        if proc.returncode == 0:
+            message_id = ""
+            try:
+                payload = json.loads(stdout)
+                message_id = str((payload.get("data") or {}).get("message_id", "") or "")
+            except Exception:
+                pass
+            return {
+                "status": "sent",
+                "chat_id": FEISHU_CHAT_ID,
+                "message_id": message_id,
+                "idempotency_key": f"daily-ai-brief-feishu-summary-{date}",
+            }
+        return {
+            "status": "error",
+            "reason": stderr or stdout or f"feishu-agent exit={proc.returncode}",
+            "returncode": proc.returncode,
+        }
+    except Exception as exc:
+        return {"status": "error", "reason": str(exc)}
+
+
 def _top_words(texts: List[str]) -> set:
     stop = {
         "the",
@@ -3982,6 +4356,7 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
     if not broker_reports:
         broker_reports = []
     llm_model_releases = collect_llm_model_releases(as_of=now)
+    latest_papers = collect_latest_ai_papers(as_of=now, history=history)
 
     aiHighlights = []
     if not (openai or anthropic or infoq or frontier or ai_search_updates or priority_raw):
@@ -4067,6 +4442,8 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
     source_channels.append("Twitter 美国科技公司")
     source_channels.append("新浪研报（10大券商）")
     source_channels.append("LLM 模型发布/价格")
+    if latest_papers:
+        source_channels.append("arXiv / Nature / Science 最新 AI 论文")
 
     report = {
         "date": date_str,
@@ -4083,6 +4460,7 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
         "twitterUpdates": twitter_updates,
         "brokerReports": broker_reports,
         "llmModelReleases": llm_model_releases,
+        "latestAiPapers": latest_papers,
         "topicSummary": topic_summary,
         "skillTop": skill_top,
         "focusedSignals": focused,
@@ -4263,6 +4641,7 @@ def format_html(report: Dict) -> str:
     twitter_updates = report.get("twitterUpdates", [])
     broker_reports = report.get("brokerReports", [])
     llm_models = report.get("llmModelReleases", [])
+    latest_papers = report.get("latestAiPapers", [])
     topic_summary = report.get("topicSummary", [])
     focused_blocks = report.get("focusedSignals", [])
     deep_dive = report.get("githubDeepDive")
@@ -4592,6 +4971,22 @@ def format_html(report: Dict) -> str:
             for item in llm_models
         ],
     )
+    paper_table_html = _render_html_table(
+        ["论文", "发布时间", "分类", "来源团队/作者", "定义", "价值", "解决什么问题", "详情"],
+        [
+            [
+                escape(str(item.get("title", ""))),
+                escape(str(item.get("published", ""))),
+                escape(str(item.get("categories", ""))),
+                escape(str(item.get("authors", ""))),
+                escape(str(item.get("definition", ""))),
+                escape(str(item.get("value", ""))),
+                escape(str(item.get("problem", ""))),
+                f"<a href='{escape(str(item.get('link', '')))}'>详情</a>" if item.get("link") else "",
+            ]
+            for item in latest_papers
+        ],
+    )
 
     skill_html = []
     for key, block in skill_blocks.items():
@@ -4680,6 +5075,8 @@ def format_html(report: Dict) -> str:
         )
     if llm_models:
         sections.append("<section class='card'><h2 class='main-title'>LLM 模型发布与价格</h2>" + llm_table_html + "</section>")
+    if latest_papers:
+        sections.append("<section class='card'><h2 class='main-title'>最新 AI 论文 Top10</h2>" + paper_table_html + "</section>")
     if topic_cards_html:
         sections.append(
             "<section class='card'><h2 class='main-title'>今日新词汇</h2>"
@@ -4748,7 +5145,7 @@ def format_html(report: Dict) -> str:
         f"<p>今日差异：{escape(report.get('diffSummary', ''))}</p>{policy_html}</section>"
     )
 
-    source = escape(source_html)
+    source = escape(" / ".join([str(item) for item in source_list if str(item).strip()]))
     return f"""
 <!doctype html>
 <html lang=\"zh-CN\">
@@ -4937,6 +5334,7 @@ def format_markdown(report: Dict) -> str:
     source_list = report.get("source_channels", [])
     deep_dive = report.get("githubDeepDive")
     llm_models = report.get("llmModelReleases", [])
+    latest_papers = report.get("latestAiPapers", [])
     topic_summary = report.get("topicSummary", [])
     ai_highlights = report.get("aiHighlights", [])
     skill_blocks = report.get("skillTop", {}) or {}
@@ -4977,6 +5375,19 @@ def format_markdown(report: Dict) -> str:
                 item.get("input_per_million", ""), item.get("output_per_million", ""), item.get("overall_per_million", ""),
                 item.get("summary", ""), item.get("source", ""),
             ] for item in llm_models],
+        )
+        lines.extend(table)
+        lines.append("")
+
+    if latest_papers:
+        lines.extend(["## 最新 AI 论文 Top10", ""])
+        table = _render_markdown_table(
+            ["论文", "发布时间", "分类", "来源团队/作者", "定义", "价值", "解决什么问题", "详情"],
+            [[
+                item.get("title", ""), item.get("published", ""), item.get("categories", ""),
+                item.get("authors", ""), item.get("definition", ""), item.get("value", ""),
+                item.get("problem", ""), f"[详情]({item.get('link', '')})" if item.get("link") else "",
+            ] for item in latest_papers],
         )
         lines.extend(table)
         lines.append("")
@@ -5730,10 +6141,12 @@ def run() -> Dict:
                     "transport": "timeout_guard",
                     "email_config": _email_config_snapshot(),
                 }
+        feishu_result = send_feishu_ai_brief(sent_report, str(out_html_file), email_result)
         return {
             "markdown": sent_md,
             "html": sent_html,
             "email": email_result,
+            "feishu": feishu_result,
             "state_file": str(STATE_FILE),
             "output_file": str(out_html_file),
             "output_html_file": str(out_html_file),
@@ -5758,6 +6171,7 @@ def run() -> Dict:
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("--dry-run", action="store_true")
+    parser.add_argument("--print-full-report", action="store_true", help="打印完整 Markdown 日报正文；默认只输出关键执行结果")
     parser.add_argument("--email-diagnose", action="store_true", help="仅输出邮件配置诊断，不执行发送/抓取")
     parser.add_argument("--email-transport-check", action="store_true", help="检查 SMTP/sendmail/API 可达性")
     args = parser.parse_args()
@@ -5772,8 +6186,9 @@ if __name__ == "__main__":
         print(format_markdown(built))
     else:
         r = run()
-        print(r["markdown"])
-        print("\n---")
+        if args.print_full_report:
+            print(r["markdown"])
+            print("\n---")
         print(f"STATE: {r['state_file']}")
         print(f"OUTPUT: {r['output_file']}")
         print(f"HTML_OUTPUT: {r.get('output_html_file')}")
@@ -5790,6 +6205,13 @@ if __name__ == "__main__":
             print(f"EMAIL: error -> {email.get('reason')}")
         if email.get("status") != "sent":
             print(f"EMAIL_CONFIG: {json.dumps(email.get('email_config', {}), ensure_ascii=False)}")
+        feishu = r.get("feishu", {})
+        if feishu.get("status") == "sent":
+            print(f"FEISHU: sent -> {feishu.get('message_id')}")
+        elif feishu.get("status") == "skip":
+            print(f"FEISHU: skip -> {feishu.get('reason')}")
+        else:
+            print(f"FEISHU: error -> {feishu.get('reason')}")
         if r.get("timed_out"):
             print(f"TIMEOUT: {r.get('timeout_reason')} ({r.get('timeout_seconds')}s)")
         if isinstance(r.get("inspection_text"), str):
