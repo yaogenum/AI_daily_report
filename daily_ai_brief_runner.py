@@ -758,18 +758,18 @@ def _topic_rank_reason(item: Dict[str, object], rank: int) -> str:
 
 
 def collect_llm_model_releases(as_of: datetime | None = None, max_age_days: int = 14) -> List[Dict[str, str]]:
-    """Latest model release/pricing watchlist.
+    """Return each provider's latest and previous active API model.
 
-    Prices are normalized to the public list price per 1M input/output tokens.
-    Entries without a release_date, or older than max_age_days, are excluded so
-    the daily report does not keep stale model versions.
+    This is an active-pricing catalog, not a 14-day news feed.  A previous
+    implementation applied the news freshness window here, which silently
+    removed nearly all providers after two weeks and made the pricing table
+    look incomplete.  Release freshness is handled separately in AI 信息.
     """
-    today = (as_of or datetime.now().astimezone()).date()
-    cutoff = today - timedelta(days=max_age_days)
     items = [
         {
             "company": "DeepSeek",
             "model": "DeepSeek-V4-Pro",
+            "tier": "最新",
             "version": "deepseek-v4-pro",
             "release_date": "2026-07-18",
             "input_per_million": "$0.435",
@@ -779,8 +779,21 @@ def collect_llm_model_releases(as_of: datetime | None = None, max_age_days: int 
             "source": "https://api-docs.deepseek.com/quick_start/pricing/",
         },
         {
+            "company": "DeepSeek",
+            "model": "DeepSeek-V4-Flash-0731",
+            "tier": "次新",
+            "version": "deepseek-v4-flash",
+            "release_date": "2026-07-31",
+            "input_per_million": "见官方价格页",
+            "output_per_million": "见官方价格页",
+            "overall_per_million": "按输入+输出计费",
+            "summary": "轻量高速版，面向高并发推理与工具调用；别名自动指向最新快照",
+            "source": "https://api-docs.deepseek.com/quick_start/pricing/",
+        },
+        {
             "company": "Anthropic",
             "model": "Claude Fable 5",
+            "tier": "最新",
             "version": "Claude Fable 5",
             "release_date": "2026-07-17",
             "input_per_million": "$10.00",
@@ -792,6 +805,7 @@ def collect_llm_model_releases(as_of: datetime | None = None, max_age_days: int 
         {
             "company": "OpenAI",
             "model": "GPT-5.6 Sol",
+            "tier": "最新",
             "version": "gpt-5.6-sol",
             "release_date": "2026-07-09",
             "input_per_million": "$5.00",
@@ -803,6 +817,7 @@ def collect_llm_model_releases(as_of: datetime | None = None, max_age_days: int 
         {
             "company": "Google",
             "model": "Gemini 2.5 Pro",
+            "tier": "最新",
             "version": "gemini-2.5-pro",
             "release_date": "2026-07-07",
             "input_per_million": "$1.25 / $2.50",
@@ -812,19 +827,33 @@ def collect_llm_model_releases(as_of: datetime | None = None, max_age_days: int 
             "source": "https://ai.google.dev/gemini-api/docs/pricing",
         },
         {
-            "company": "Alibaba",
+            "company": "Alibaba / Qwen",
+            "model": "Qwen3.8-Max",
+            "tier": "最新",
+            "version": "qwen3.8-max",
+            "release_date": "官方公告未标注",
+            "input_per_million": "¥12.00",
+            "output_per_million": "¥36.00",
+            "overall_per_million": "¥48.00",
+            "summary": "1M上下文、推理与Agent工具调用旗舰；官方当前最高能力推荐",
+            "source": "https://help.aliyun.com/en/model-studio/model-pricing",
+        },
+        {
+            "company": "Alibaba / Qwen",
             "model": "Qwen3.7-Max",
-            "version": "qwen3.7-max",
-            "release_date": "2026-07-16",
-            "input_per_million": "$2.50",
-            "output_per_million": "$7.50",
-            "overall_per_million": "$10.00",
-            "summary": "千问旗舰，强化多模态、办公与Agent生产力",
-            "source": "https://www.alibabacloud.com/help/en/model-studio/model-pricing",
+            "tier": "次新",
+            "version": "qwen3.7-max-2026-05-20",
+            "release_date": "2026-05-20",
+            "input_per_million": "¥12.00",
+            "output_per_million": "¥36.00",
+            "overall_per_million": "¥48.00",
+            "summary": "上一代Agent旗舰，偏编程、办公生产力与长程自主执行",
+            "source": "https://help.aliyun.com/en/model-studio/qwen3-7-max",
         },
         {
             "company": "Zhipu GLM",
             "model": "GLM-5.2",
+            "tier": "最新",
             "version": "glm-5.2",
             "release_date": "2026-07-15",
             "input_per_million": "¥8.00",
@@ -835,25 +864,65 @@ def collect_llm_model_releases(as_of: datetime | None = None, max_age_days: int 
         },
         {
             "company": "Moonshot Kimi",
-            "model": "Kimi K3",
-            "version": "kimi-k3",
-            "release_date": "2026-07-12",
-            "input_per_million": "$3.00",
-            "output_per_million": "$15.00",
-            "overall_per_million": "$18.00",
-            "summary": "1M上下文旗舰，强化长程编程与知识工作",
-            "source": "https://platform.kimi.com/docs/pricing/chat-k3",
+            "model": "Kimi K2.7 Code",
+            "tier": "最新",
+            "version": "kimi-k2.7-code",
+            "release_date": "官方公告未标注",
+            "input_per_million": "¥6.50",
+            "output_per_million": "¥27.00",
+            "overall_per_million": "¥33.50",
+            "summary": "Coding Agent 模型，长上下文指令遵循与代码任务成功率更高",
+            "source": "https://platform.kimi.com/docs/pricing/chat-k26",
+        },
+        {
+            "company": "Moonshot Kimi",
+            "model": "Kimi K2.6",
+            "tier": "次新",
+            "version": "kimi-k2.6",
+            "release_date": "官方公告未标注",
+            "input_per_million": "¥6.50",
+            "output_per_million": "¥27.00",
+            "overall_per_million": "¥33.50",
+            "summary": "通用多模态模型，支持视觉、思考模式和对话/编程 Agent",
+            "source": "https://platform.kimi.com/docs/pricing/chat-k26",
         },
     ]
-    recent: List[Dict[str, str]] = []
-    for item in items:
+    return items
+
+
+def collect_official_model_release_highlights(
+    as_of: datetime | None = None,
+    max_age_days: int = 30,
+) -> List[Dict[str, str]]:
+    """Expose major vendor releases as AI 信息 using only official pages.
+
+    Pricing records remain visible for active models; this function is the
+    freshness gate so the AI 信息 area does not become a repeating price list.
+    """
+    today = (as_of or datetime.now().astimezone()).date()
+    out: List[Dict[str, str]] = []
+    seen_companies: set[str] = set()
+    for item in collect_llm_model_releases(as_of=as_of):
+        if item.get("tier") != "最新" or item.get("company") in seen_companies:
+            continue
         try:
             release_day = datetime.fromisoformat(str(item.get("release_date", ""))).date()
-        except Exception:
+        except ValueError:
+            release_day = None
+        if release_day and (release_day < today - timedelta(days=max_age_days) or release_day > today):
             continue
-        if cutoff <= release_day <= today:
-            recent.append(item)
-    return recent
+        seen_companies.add(str(item.get("company", "")))
+        out.append(
+            {
+                "title": f"{item.get('company')} 发布 {item.get('model')}",
+                "source": f"{item.get('company')} 官方模型公告/价格页",
+                "time": release_day.isoformat() if release_day else "官方当前模型页（发布时间待公告确认）",
+                "link": str(item.get("source", "")),
+                "raw": str(item.get("summary", "")),
+                "summary": str(item.get("summary", "")),
+            }
+        )
+    return out
 
 
 def _build_structured_diff(report: Dict) -> Dict[str, List[str]]:
@@ -4356,6 +4425,7 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
     if not broker_reports:
         broker_reports = []
     llm_model_releases = collect_llm_model_releases(as_of=now)
+    official_model_updates = collect_official_model_release_highlights(as_of=now)
     latest_papers = collect_latest_ai_papers(as_of=now, history=history)
 
     aiHighlights = []
@@ -4363,7 +4433,7 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
         aiHighlights = []
         merged_signals = []
     else:
-        merged_signals = append_source_link([*openai, *anthropic, *infoq, *frontier, *ai_search_updates, *priority_raw])  # 保留统一结构与链接
+        merged_signals = append_source_link([*official_model_updates, *openai, *anthropic, *infoq, *frontier, *ai_search_updates, *priority_raw])  # 保留统一结构与链接
         seen_titles = set()
         for s in merged_signals[:8]:
             if s["title"] in seen_titles:
@@ -4891,7 +4961,7 @@ def format_html(report: Dict) -> str:
 
     has_wechat_table = bool(wechat_top20)
     wechat_table_html = _render_html_table(
-        ["排名", "公众号", "ID", "内容概述", "新榜指数", "平均阅读数", "链接"],
+        ["排名", "公众号", "ID", "内容概述", "新榜指数", "平均阅读数"],
         [
             [
                 escape(str(item.get("rank", idx))),
@@ -4900,7 +4970,6 @@ def format_html(report: Dict) -> str:
                 escape(_wechat_account_summary(item)),
                 escape(str(item.get("score", ""))),
                 escape(str(item.get("avgReads", ""))),
-                f"<a href='{escape(str(item.get('link', '')))}'>{escape(str(item.get('link', '')))}</a>" if item.get("link") else "",
             ]
             for idx, item in enumerate(wechat_top20[:20], start=1)
         ],
@@ -4955,10 +5024,11 @@ def format_html(report: Dict) -> str:
         ],
     )
     llm_table_html = _render_html_table(
-        ["公司", "最新模型", "版本", "发布时间", "输入/百万token", "输出/百万token", "整体/百万token", "升级概述", "来源"],
+        ["公司", "档位", "模型", "版本", "发布时间", "输入/百万token", "输出/百万token", "整体/百万token", "升级概述", "来源"],
         [
             [
                 escape(str(item.get("company", ""))),
+                escape(str(item.get("tier", "当前"))),
                 escape(str(item.get("model", ""))),
                 escape(str(item.get("version", ""))),
                 escape(str(item.get("release_date", ""))),
@@ -5125,7 +5195,11 @@ def format_html(report: Dict) -> str:
             "</section>"
         )
     if has_wechat_table:
-        sections.append("<section class='card'><h2 class='main-title'>WeChat Top20 AI 公告号</h2>" + wechat_table_html + "</section>")
+        sections.append(
+            "<section class='card'><h2 class='main-title'>WeChat Top20 AI 公告号</h2>"
+            + wechat_table_html
+            + f"<p>榜单数据来源：<a href='{escape(WECHAT_TOP20_GZH_URL)}'>详情</a>。该来源仅提供榜单，未提供每个公众号的独立文章链接。</p></section>"
+        )
     if twitter_html:
         sections.append("<section class='card'><h2 class='main-title'>Twitter 美国科技公司 AI 动态</h2><ul>" + "".join(twitter_html) + "</ul>" + twitter_table_html + "</section>")
     if broker_reports:
@@ -5369,9 +5443,9 @@ def format_markdown(report: Dict) -> str:
     if llm_models:
         lines.extend(["## LLM 模型发布与价格", ""])
         table = _render_markdown_table(
-            ["公司", "最新模型", "版本", "发布时间", "输入/百万token", "输出/百万token", "整体/百万token", "升级概述", "来源"],
+            ["公司", "档位", "模型", "版本", "发布时间", "输入/百万token", "输出/百万token", "整体/百万token", "升级概述", "来源"],
             [[
-                item.get("company", ""), item.get("model", ""), item.get("version", ""), item.get("release_date", ""),
+                item.get("company", ""), item.get("tier", "当前"), item.get("model", ""), item.get("version", ""), item.get("release_date", ""),
                 item.get("input_per_million", ""), item.get("output_per_million", ""), item.get("overall_per_million", ""),
                 item.get("summary", ""), item.get("source", ""),
             ] for item in llm_models],
