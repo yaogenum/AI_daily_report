@@ -26,7 +26,7 @@ import ssl
 import urllib.error
 import urllib.request
 from urllib.parse import quote, unquote, urljoin
-from datetime import datetime, timedelta, timezone
+from datetime import date, datetime, timedelta, timezone
 from html import escape, unescape
 from pathlib import Path
 from typing import Callable, Dict, List
@@ -112,9 +112,12 @@ class DailyBriefTimeout(TimeoutError):
 
 
 STATE_FILE = Path(__file__).with_name("daily_ai_brief_state.json")
+GITHUB_STAR_SNAPSHOT_FILE = Path(__file__).with_name("github_star_snapshots.json")
 REPORT_OUTPUT_DIR = Path(__file__).with_name("report")
 MAX_RECORDS = 14
 REPORT_FILE_RETENTION_DAYS = 30
+GITHUB_STAR_SNAPSHOT_RETENTION_DAYS = 35
+GITHUB_DEEP_DIVE_COOLDOWN_DAYS = 7
 RELATED_WINDOW_DAYS = 7
 DAILY_AI_BRIEF_CATCHUP_DAYS = max(1, _read_int_env("DAILY_AI_BRIEF_CATCHUP_DAYS", "BACKFILL_DAYS", default=3))
 DAILY_AI_BRIEF_MAX_RUNTIME_SECONDS = max(
@@ -666,7 +669,7 @@ def _github_project_profile(project: Dict[str, object]) -> Dict[str, str]:
             "problem": problem,
             "scenario": scenario,
             "background": _github_org_background(repo),
-            "heat": f"{project.get('source', 'GitHub')}｜总星 {project.get('currentStars', '')}｜7天增量 {project.get('delta7d', '')}",
+            "heat": _github_heat_label(project),
         }
 
     if "codegraph" in text:
@@ -695,22 +698,64 @@ def _github_project_profile(project: Dict[str, object]) -> Dict[str, str]:
     return profile("快速上升开源项目", "解决某一类开发、Agent 或生产力工具链问题", "趋势观察、选型初筛、后续试用评测")
 
 
+def _github_heat_label(project: Dict[str, object]) -> str:
+    source = str(project.get("source", "GitHub") or "GitHub")
+    stars = project.get("currentStars", "")
+    delta = project.get("delta7d", "")
+    status = str(project.get("delta7dStatus", "") or "")
+    baseline = str(project.get("delta7dBaselineDate", "") or "")
+    external = project.get("externalDelta7d", project.get("sourceDelta7d", ""))
+    parts = [source, f"总星 {stars}"]
+    if status == "真实计算":
+        suffix = f"7天新增 {delta}"
+        if baseline:
+            suffix += f"（基线 {baseline}）"
+        parts.append(suffix)
+    elif status == "数据积累中":
+        parts.append("7天新增 数据积累中")
+        if external not in ("", None, 0, "0"):
+            parts.append(f"外部周榜参考 {external}")
+    else:
+        parts.append(f"7天新增 {delta}")
+    return "｜".join(str(x) for x in parts if str(x).strip())
+
+
+def _github_delta_label(project: Dict[str, object]) -> str:
+    status = str(project.get("delta7dStatus", "") or "")
+    delta = project.get("delta7d", "")
+    baseline = str(project.get("delta7dBaselineDate", "") or "")
+    external = project.get("externalDelta7d", project.get("sourceDelta7d", ""))
+    if status == "真实计算":
+        label = f"7天新增 {delta}"
+        if baseline:
+            label += f"（基线 {baseline}）"
+        return label
+    if status == "数据积累中":
+        if external not in ("", None, 0, "0"):
+            return f"7天新增 数据积累中（外部周榜参考 {external}）"
+        return "7天新增 数据积累中"
+    return f"7天新增 {delta}"
+
+
 def _github_deep_dive_recommendation(deep_dive: Dict[str, object]) -> str:
     repo = str(deep_dive.get("repo", "") or "该项目")
     stars = str(deep_dive.get("stars", "") or "N/A")
     delta = str(deep_dive.get("delta7d", "") or "0")
+    delta_status = str(deep_dive.get("delta7dStatus", "") or "")
+    delta_text = f"7天新增 {delta}" if delta_status == "真实计算" else f"7天新增 {delta}（{delta_status or '趋势源参考'}）"
     profile = _github_project_profile(
         {
             "repo": repo,
             "link": deep_dive.get("link", ""),
             "currentStars": stars,
             "delta7d": delta,
+            "delta7dStatus": delta_status,
             "description": deep_dive.get("problem", ""),
             "source": "GitHub",
         }
     )
     return (
-        f"推荐理由：{repo} 同时具备较高关注度（⭐ {stars}，7天增量 {delta}）、"
+        f"推荐理由：{repo} 同时具备较高关注度（⭐ {stars}，{delta_text}）、"
         f"明确定位（{profile['positioning']}）和可落地场景（{profile['scenario']}），"
         "适合作为今天优先拆解的开源样本。"
     )
@@ -757,6 +802,160 @@ def _topic_rank_reason(item: Dict[str, object], rank: int) -> str:
     return reason[:50]
 
 
+def _fetch_pricing_doc(url: str, timeout: int = 5) -> str:
+    candidates = [url]
+    for candidate in candidates:
+        try:
+            completed = subprocess.run(
+                ["curl", "-L", "-s", "--max-time", str(timeout), candidate],
+                check=False,
+                capture_output=True,
+                text=True,
+                timeout=timeout + 2,
+            )
+            text = completed.stdout if completed.returncode == 0 else ""
+            if len(text) > 200:
+                return text
+        except Exception:
+            continue
+    return ""
+
+
+def _first_price(pattern: str, text: str) -> str:
+    match = re.search(pattern, text, flags=re.I | re.S)
+    if not match:
+        return ""
+    return match.group(1).replace("CNY", "¥").replace("元", "元").strip()
+
+
+def _html_table_price_row(text: str, label: str) -> List[str]:
+    match = re.search(
+        rf"<tr>\s*<td[^>]*>{re.escape(label)}</td>\s*<td[^>]*>\$?([\d.]+)</td>\s*<td[^>]*>\$?([\d.]+)</td>",
+        text,
+        flags=re.I | re.S,
+    )
+    if not match:
+        return []
+    return [match.group(1), match.group(2)]
+
+
+def _apply_live_price(
+    item: Dict[str, str],
+    input_price: str,
+    output_price: str,
+    overall_price: str = "",
+    note: str = "",
+) -> None:
+    if input_price:
+        item["input_per_million"] = input_price
+    if output_price:
+        item["output_per_million"] = output_price
+    if overall_price:
+        item["overall_per_million"] = overall_price
+    if note:
+        item["price_check"] = note
+
+
+def _refresh_llm_prices_from_official_pages(items: List[Dict[str, str]], as_of: datetime) -> List[Dict[str, str]]:
+    checked_day = as_of.date().isoformat()
+    docs: Dict[str, str] = {}
+
+    def doc(url: str) -> str:
+        if url not in docs:
+            docs[url] = _fetch_pricing_doc(url)
+        return docs[url]
+
+    for item in items:
+        source = str(item.get("source", ""))
+        version = str(item.get("version", "")).lower()
+        item["price_check"] = f"价格未实时确认（使用目录兜底，{checked_day}）"
+        live_parse_supported = (
+            "deepseek-v4-" in version
+            or version.startswith("qwen3.")
+            or version == "glm-5.2"
+            or version.startswith("kimi-")
+        )
+        if not live_parse_supported:
+            item["price_check"] = f"官方价格实时解析待接入（使用目录兜底，{checked_day}）"
+            continue
+        text = doc(source) if source else ""
+        lowered = text.lower()
+        if not text:
+            continue
+
+        if "deepseek-v4-flash" in version and "deepseek-v4-flash" in lowered:
+            miss = _first_price(r"1M INPUT TOKENS \(CACHE MISS\)\s*\|\s*\$?([\d.]+)\s*\|\s*\$?[\d.]+", text)
+            out = _first_price(r"1M OUTPUT TOKENS\s*\|\s*\$?([\d.]+)\s*\|\s*\$?[\d.]+", text)
+            if not (miss and out):
+                miss_row = _html_table_price_row(text, "1M INPUT TOKENS (CACHE MISS)")
+                out_row = _html_table_price_row(text, "1M OUTPUT TOKENS")
+                if len(miss_row) == 2 and len(out_row) == 2:
+                    miss, out = miss_row[0], out_row[0]
+            if miss and out:
+                _apply_live_price(item, f"${miss}", f"${out}", f"${float(miss) + float(out):.2f}", f"官方实时确认（{checked_day}）")
+            continue
+
+        if "deepseek-v4-pro" in version and "deepseek-v4-pro" in lowered:
+            miss = _first_price(r"1M INPUT TOKENS \(CACHE MISS\)\s*\|\s*\$?[\d.]+\s*\|\s*\$?([\d.]+)", text)
+            out = _first_price(r"1M OUTPUT TOKENS\s*\|\s*\$?[\d.]+\s*\|\s*\$?([\d.]+)", text)
+            if not (miss and out):
+                miss_row = _html_table_price_row(text, "1M INPUT TOKENS (CACHE MISS)")
+                out_row = _html_table_price_row(text, "1M OUTPUT TOKENS")
+                if len(miss_row) == 2 and len(out_row) == 2:
+                    miss, out = miss_row[1], out_row[1]
+            if miss and out:
+                _apply_live_price(item, f"${miss}", f"${out}", f"${float(miss) + float(out):.3f}", f"官方实时确认（{checked_day}）")
+            continue
+
+        if version == "kimi-k3" and "kimi k3" in lowered:
+            row = re.search(
+                r"rows:\[\[\s*`kimi-k3`\s*,\s*`1M tokens`\s*,\s*`¥([\d.]+)`\s*,\s*`¥([\d.]+)`\s*,\s*`¥([\d.]+)`",
+                text,
+                flags=re.I | re.S,
+            )
+            if row:
+                cache_hit, miss, out = row.group(1), row.group(2), row.group(3)
+                _apply_live_price(
+                    item,
+                    f"¥{miss} / cache ¥{cache_hit}",
+                    f"¥{out}",
+                    f"¥{float(miss) + float(out):.2f} / cache ¥{float(cache_hit) + float(out):.2f}",
+                    f"官方实时确认（{checked_day}）",
+                )
+            else:
+                item["price_check"] = f"官方页面可达，价格表需人工复核（{checked_day}）"
+            continue
+
+        if version == "kimi-k2.7-code" and ("k2.7" in lowered or "k2.6" in lowered):
+            if "$0.95" in text and "$4" in text:
+                _apply_live_price(item, "$0.95", "$4.00", "$4.95", f"官方实时确认（{checked_day}）")
+            elif "6.50" in text and "27.00" in text:
+                _apply_live_price(item, "¥6.50", "¥27.00", "¥33.50", f"官方实时确认（{checked_day}）")
+            continue
+
+        if version == "qwen3.8-max" and "qwen3.8-max" in lowered:
+            if ("cny 12" in lowered or "12元" in text) and ("cny 36" in lowered or "36元" in text):
+                _apply_live_price(item, "¥12.00 / cache ¥1.50", "¥36.00", "¥48.00 / cache ¥37.50", f"官方实时确认（{checked_day}）")
+            continue
+
+        if version.startswith("qwen3.7-max") and "qwen3.7-max" in lowered:
+            if ("限时5折" in text or "50% off" in lowered) and ("12" in text and "36" in text):
+                _apply_live_price(item, "¥12.00（限时¥6.00）/ cache ¥2.40", "¥36.00（限时¥18.00）", "¥48.00（限时¥24.00）", f"官方实时确认（{checked_day}）")
+            elif "12" in text and "36" in text:
+                _apply_live_price(item, "¥12.00 / cache ¥2.40", "¥36.00", "¥48.00", f"官方实时确认（{checked_day}）")
+            continue
+
+        if "glm-5.2" in version and "glm-5.2" in lowered:
+            if "8" in text and "28" in text:
+                _apply_live_price(item, "¥8.00", "¥28.00", "¥36.00", f"官方实时确认（{checked_day}）")
+            continue
+
+        if any(key in version for key in ("claude", "gpt", "gemini")):
+            item["price_check"] = f"官方价格页已抓取，自动解析待补强（{checked_day}）"
+
+    return items
+
+
 def collect_llm_model_releases(as_of: datetime | None = None, max_age_days: int = 14) -> List[Dict[str, str]]:
     """Return each provider's latest and previous active API model.
 
@@ -784,9 +983,9 @@ def collect_llm_model_releases(as_of: datetime | None = None, max_age_days: int 
             "tier": "次新",
             "version": "deepseek-v4-flash",
             "release_date": "2026-07-31",
-            "input_per_million": "见官方价格页",
-            "output_per_million": "见官方价格页",
-            "overall_per_million": "按输入+输出计费",
+            "input_per_million": "$0.14",
+            "output_per_million": "$0.28",
+            "overall_per_million": "$0.42",
             "summary": "轻量高速版，面向高并发推理与工具调用；别名自动指向最新快照",
             "source": "https://api-docs.deepseek.com/quick_start/pricing/",
         },
@@ -832,10 +1031,10 @@ def collect_llm_model_releases(as_of: datetime | None = None, max_age_days: int 
             "tier": "最新",
             "version": "qwen3.8-max",
             "release_date": "官方公告未标注",
-            "input_per_million": "¥12.00",
+            "input_per_million": "¥12.00 / cache ¥1.50",
             "output_per_million": "¥36.00",
-            "overall_per_million": "¥48.00",
-            "summary": "1M上下文、推理与Agent工具调用旗舰；官方当前最高能力推荐",
+            "overall_per_million": "¥48.00 / cache ¥37.50",
+            "summary": "1M上下文，多模态旗舰，强化自主编程、视觉理解与复杂Agent任务",
             "source": "https://help.aliyun.com/en/model-studio/model-pricing",
         },
         {
@@ -844,11 +1043,11 @@ def collect_llm_model_releases(as_of: datetime | None = None, max_age_days: int 
             "tier": "次新",
             "version": "qwen3.7-max-2026-05-20",
             "release_date": "2026-05-20",
-            "input_per_million": "¥12.00",
-            "output_per_million": "¥36.00",
-            "overall_per_million": "¥48.00",
-            "summary": "上一代Agent旗舰，偏编程、办公生产力与长程自主执行",
-            "source": "https://help.aliyun.com/en/model-studio/qwen3-7-max",
+            "input_per_million": "¥12.00（限时¥6.00）/ cache ¥2.40",
+            "output_per_million": "¥36.00（限时¥18.00）",
+            "overall_per_million": "¥48.00（限时¥24.00）",
+            "summary": "次新旗舰，官方当前等同2026-05-20版；价格页标注限时5折",
+            "source": "https://help.aliyun.com/en/model-studio/model-pricing",
         },
         {
             "company": "Zhipu GLM",
@@ -864,8 +1063,20 @@ def collect_llm_model_releases(as_of: datetime | None = None, max_age_days: int 
         },
         {
             "company": "Moonshot Kimi",
-            "model": "Kimi K2.7 Code",
+            "model": "Kimi K3",
             "tier": "最新",
+            "version": "kimi-k3",
+            "release_date": "2026-07-16",
+            "input_per_million": "¥20.00 / cache ¥2.00",
+            "output_per_million": "¥100.00",
+            "overall_per_million": "¥120.00 / cache ¥102.00",
+            "summary": "旗舰模型，1M上下文，强化长程编程、深度推理与端到端知识工作",
+            "source": "https://platform.kimi.com/docs/pricing/chat-k3",
+        },
+        {
+            "company": "Moonshot Kimi",
+            "model": "Kimi K2.7 Code",
+            "tier": "次新",
             "version": "kimi-k2.7-code",
             "release_date": "官方公告未标注",
             "input_per_million": "¥6.50",
@@ -874,20 +1085,8 @@ def collect_llm_model_releases(as_of: datetime | None = None, max_age_days: int 
             "summary": "Coding Agent 模型，长上下文指令遵循与代码任务成功率更高",
             "source": "https://platform.kimi.com/docs/pricing/chat-k26",
         },
-        {
-            "company": "Moonshot Kimi",
-            "model": "Kimi K2.6",
-            "tier": "次新",
-            "version": "kimi-k2.6",
-            "release_date": "官方公告未标注",
-            "input_per_million": "¥6.50",
-            "output_per_million": "¥27.00",
-            "overall_per_million": "¥33.50",
-            "summary": "通用多模态模型，支持视觉、思考模式和对话/编程 Agent",
-            "source": "https://platform.kimi.com/docs/pricing/chat-k26",
-        },
     ]
-    return items
+    return _refresh_llm_prices_from_official_pages(items, as_of or datetime.now().astimezone())
 
 
 def collect_official_model_release_highlights(
@@ -2984,7 +3183,7 @@ def select_top_skills(trend_projects: List[Dict[str, object]]) -> Dict[str, Dict
     if trend_projects:
         sorted_projects = sorted(
             trend_projects,
-            key=lambda p: (int(p.get("currentStars", 0)), int(p.get("delta7d", 0))),
+            key=lambda p: (_safe_int(p.get("currentStars", 0)), _safe_int(p.get("delta7d", 0))),
             reverse=True,
         )
     else:
@@ -3099,6 +3298,121 @@ def _safe_int(value: object, default: int = 0) -> int:
             return default
 
 
+def _load_github_star_snapshots() -> Dict[str, Dict[str, int]]:
+    if not GITHUB_STAR_SNAPSHOT_FILE.exists():
+        return {}
+    try:
+        with GITHUB_STAR_SNAPSHOT_FILE.open("r", encoding="utf-8") as f:
+            data = json.load(f)
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    out: Dict[str, Dict[str, int]] = {}
+    for repo, series in data.items():
+        if not isinstance(repo, str) or not isinstance(series, dict):
+            continue
+        clean_series: Dict[str, int] = {}
+        for day, stars in series.items():
+            if isinstance(day, str):
+                star_i = _safe_int(stars, -1)
+                if star_i >= 0:
+                    clean_series[day] = star_i
+        if clean_series:
+            out[repo] = clean_series
+    return out
+
+
+def _save_github_star_snapshots(snapshots: Dict[str, Dict[str, int]], today: date) -> None:
+    cutoff = today - timedelta(days=GITHUB_STAR_SNAPSHOT_RETENTION_DAYS)
+    pruned: Dict[str, Dict[str, int]] = {}
+    for repo, series in snapshots.items():
+        kept: Dict[str, int] = {}
+        for day, stars in series.items():
+            try:
+                parsed = date.fromisoformat(day)
+            except Exception:
+                continue
+            if parsed >= cutoff:
+                kept[day] = int(stars)
+        if kept:
+            pruned[repo] = dict(sorted(kept.items()))
+    with GITHUB_STAR_SNAPSHOT_FILE.open("w", encoding="utf-8") as f:
+        json.dump(pruned, f, ensure_ascii=False, indent=2, sort_keys=True)
+
+
+def refresh_github_star_metrics(projects: List[Dict[str, object]], as_of: datetime) -> List[Dict[str, object]]:
+    if not projects:
+        return []
+    snapshots = _load_github_star_snapshots()
+    today = as_of.date()
+    today_key = today.isoformat()
+    baseline_key = (today - timedelta(days=7)).isoformat()
+    refreshed: List[Dict[str, object]] = []
+
+    for item in projects:
+        if not isinstance(item, dict):
+            continue
+        repo = str(item.get("repo", "")).strip()
+        if not repo:
+            continue
+        project = dict(item)
+        source_delta = _safe_int(project.get("delta7d", 0), 0)
+        if source_delta > 0:
+            project["externalDelta7d"] = source_delta
+        meta = fetch_repo_meta(repo)
+        if meta:
+            for key in ("link", "currentStars", "highlights"):
+                if meta.get(key) not in (None, ""):
+                    project[key] = meta[key]
+            if not project.get("description") and meta.get("highlights"):
+                project["description"] = meta.get("highlights", "")
+
+        current_stars = _safe_int(project.get("currentStars", 0), 0)
+        repo_series = snapshots.setdefault(repo, {})
+        if current_stars > 0:
+            repo_series[today_key] = current_stars
+        baseline = repo_series.get(baseline_key)
+        if current_stars > 0 and isinstance(baseline, int):
+            project["delta7d"] = max(current_stars - baseline, 0)
+            project["delta7dStatus"] = "真实计算"
+            project["delta7dBaselineDate"] = baseline_key
+        else:
+            project["delta7d"] = "数据积累中"
+            project["delta7dStatus"] = "数据积累中"
+            if source_delta > 0:
+                project["highlights"] = f"外部周榜参考：近7天新增 {source_delta}；本地真实7天数据仍在积累。"
+        project["shortDescription"] = _github_short_description(project)
+        refreshed.append(project)
+
+    _save_github_star_snapshots(snapshots, today)
+    return refreshed
+
+
+def _recent_deep_dive_repos(history: List[Dict], current_date: str) -> set[str]:
+    repos: set[str] = set()
+    try:
+        current = date.fromisoformat(current_date)
+    except Exception:
+        current = None
+    for record in reversed(history or []):
+        if not isinstance(record, dict):
+            continue
+        record_date = str(record.get("date", "") or "")
+        if current and record_date:
+            try:
+                if (current - date.fromisoformat(record_date)).days > GITHUB_DEEP_DIVE_COOLDOWN_DAYS:
+                    continue
+            except Exception:
+                pass
+        deep = record.get("githubDeepDive")
+        if isinstance(deep, dict):
+            repo = str(deep.get("repo", "") or "").strip()
+            if repo:
+                repos.add(repo)
+    return repos
+
+
 def _fetch_github_readme_text(repo: str) -> str:
     candidate_paths = ["README.md", "readme.md"]
     branches = ["main", "master"]
@@ -3139,6 +3453,8 @@ def _build_architecture_from_text(repo: str, source_text: str, readme_text: str)
 def build_github_deep_dive_project(
     trend_projects: List[Dict[str, object]],
     fallback_candidates: List[Dict[str, object]],
+    history: List[Dict] | None = None,
+    current_date: str = "",
 ) -> Dict[str, object] | None:
     pool: List[Dict[str, object]] = []
     for item in trend_projects or []:
@@ -3152,10 +3468,14 @@ def build_github_deep_dive_project(
     if not pool:
         return None
 
+    recent_repos = _recent_deep_dive_repos(history or [], current_date) if current_date else set()
+    fresh_pool = [p for p in pool if str(p.get("repo", "")).strip() not in recent_repos]
+    ranking_pool = fresh_pool or pool
     ranked = sorted(
-        pool,
+        ranking_pool,
         key=lambda p: (
             _safe_int(p.get("delta7d", 0)),
+            _safe_int(p.get("externalDelta7d", 0)),
             _safe_int(p.get("currentStars", 0)),
             -_safe_int(p.get("rank", 10**9)),
         ),
@@ -3169,11 +3489,18 @@ def build_github_deep_dive_project(
     # 趋势源的 7 天增量和 GitHub 仓库 API 的总星数是两类数据：后者不提供
     # 周增量。过去直接 update 会把可信趋势值覆盖成 API 兜底值 0。
     trend_delta = _safe_int(target.get("delta7d", 0))
+    delta_status = str(target.get("delta7dStatus", "") or "")
+    external_delta = _safe_int(target.get("externalDelta7d", 0))
     meta = fetch_repo_meta(repo) if repo else target
     if meta:
         target.update(meta)
-    if trend_delta > 0:
+    if delta_status == "真实计算":
         target["delta7d"] = trend_delta
+        target["delta7dStatus"] = delta_status
+    elif external_delta > 0:
+        target["externalDelta7d"] = external_delta
+        target["delta7d"] = "数据积累中"
+        target["delta7dStatus"] = "数据积累中"
     readme = _fetch_github_readme_text(repo)
     if not readme:
         readme = str(target.get("description", ""))
@@ -3190,6 +3517,8 @@ def build_github_deep_dive_project(
         "link": target.get("link", github_repo_link(repo)),
         "stars": _safe_int(target.get("currentStars", 0)),
         "delta7d": _safe_int(target.get("delta7d", 0)) or "待积累",
+        "delta7dStatus": target.get("delta7dStatus", ""),
+        "externalDelta7d": target.get("externalDelta7d", ""),
         "problem": _infer_solution_from_text(repo, description, source_text, mode="problem"),
         "solution": _infer_solution_from_text(repo, description, readme, mode="solution"),
         "architecture": _build_architecture_from_text(repo, source_text, readme),
@@ -4414,6 +4743,7 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
     if not trend:
         trend = _last_valid_history_items(history, "trendProjects", max_items=12)
         trend = _mark_history_fallback(trend, "历史复用")
+    trend = refresh_github_star_metrics(trend, now)
     ai_search_updates = collect_ai_search_updates_with_enhancement()
     wechat_top20 = collect_top_wechat_gzh()
     if not wechat_top20:
@@ -4476,6 +4806,8 @@ def build_today_report(as_of: datetime | None = None, history: List[Dict] | None
         fallback_candidates=(skill_top.get("ai_engineering", {}).get("items", [])
                              + skill_top.get("agent_orchestration", {}).get("items", [])
                              + skill_top.get("ppt_skill", {}).get("items", [])),
+        history=history,
+        current_date=date_str,
     )
     topic_summary = summarize_hot_topics(
         {
@@ -4589,7 +4921,7 @@ def format_markdown(report: Dict) -> str:
             link = it.get("link", github_repo_link(repo))
             source = it.get("source", "GitHub")
             lines.append(
-                f"- [{repo}]({link})｜来源：{source}｜当前星数 `{it.get('currentStars', 0)}`｜7天增量 `{it.get('delta7d', 0)}`｜{it.get('highlights', it.get('why', ''))}"
+                f"- [{repo}]({link})｜来源：{source}｜当前星数 `{it.get('currentStars', 0)}`｜{_github_delta_label(it)}｜{it.get('highlights', it.get('why', ''))}"
             )
         lines.append("")
 
@@ -4638,7 +4970,7 @@ def format_markdown(report: Dict) -> str:
         link = p.get("link", github_repo_link(repo))
         profile = _github_project_profile(p)
         lines.append(
-            f"- [{repo}]({link})：{profile['positioning']}；解决：{profile['problem']}；热度：总星 `{p.get('currentStars')}`，7天增量 `{p.get('delta7d')}`"
+            f"- [{repo}]({link})：{profile['positioning']}；解决：{profile['problem']}；热度：总星 `{p.get('currentStars')}`，{_github_delta_label(p)}"
         )
     lines.append("")
     lines.extend(["## 今日高频主题（自动提取）", ""])
@@ -4748,8 +5080,8 @@ def format_html(report: Dict) -> str:
             f"{escape(p.get('link', github_repo_link(p.get('repo', ''))))}'>"
             f"{escape(p.get('repo', ''))}</a></strong>："
             f"{escape(profile['positioning'])}；解决：{escape(profile['problem'])}；总星 "
-            f"<code>{escape(str(p.get('currentStars', '')))}</code>，7 天增量 "
-            f"<code>{escape(str(p.get('delta7d', '')))}</code></li>"
+            f"<code>{escape(str(p.get('currentStars', '')))}</code>，"
+            f"{escape(_github_delta_label(p))}</li>"
         )
 
     wechat_html = []
@@ -4795,7 +5127,7 @@ def format_html(report: Dict) -> str:
             skill_items += (
                 "<li><a href='"
                 f"{escape(link)}'>{escape(repo)}</a>｜"
-                f"星数: <code>{escape(str(it.get('currentStars', '')))}</code>｜7天增量: <code>{escape(str(it.get('delta7d', '')))}</code>｜"
+                f"星数: <code>{escape(str(it.get('currentStars', '')))}</code>｜{escape(_github_delta_label(it))}｜"
                 f"{escape(str(it.get('highlights', it.get('why', ''))))}</li>"
             )
         skill_html.append(
@@ -4940,8 +5272,8 @@ def format_html(report: Dict) -> str:
             f"{escape(p.get('link', github_repo_link(p.get('repo', ''))))}'>"
             f"{escape(p.get('repo', ''))}</a></strong>："
             f"{escape(profile['positioning'])}；解决：{escape(profile['problem'])}；总星 "
-            f"<code>{escape(str(p.get('currentStars', '')))}</code>，7 天增量 "
-            f"<code>{escape(str(p.get('delta7d', '')))}</code></li>"
+            f"<code>{escape(str(p.get('currentStars', '')))}</code>，"
+            f"{escape(_github_delta_label(p))}</li>"
         )
     trend_table_html = _render_html_table(
         ["排名", "仓库", "定位", "解决问题", "应用场景", "背景", "热度"],
@@ -5024,7 +5356,7 @@ def format_html(report: Dict) -> str:
         ],
     )
     llm_table_html = _render_html_table(
-        ["公司", "档位", "模型", "版本", "发布时间", "输入/百万token", "输出/百万token", "整体/百万token", "升级概述", "来源"],
+        ["公司", "档位", "模型", "版本", "发布时间", "输入/百万token", "输出/百万token", "整体/百万token", "价格校验", "升级概述", "来源"],
         [
             [
                 escape(str(item.get("company", ""))),
@@ -5035,6 +5367,7 @@ def format_html(report: Dict) -> str:
                 escape(str(item.get("input_per_million", ""))),
                 escape(str(item.get("output_per_million", ""))),
                 escape(str(item.get("overall_per_million", ""))),
+                escape(str(item.get("price_check", ""))),
                 escape(str(item.get("summary", ""))),
                 f"<a href='{escape(str(item.get('source', '')))}'>{escape(str(item.get('source', '')))}</a>" if item.get("source") else "",
             ]
@@ -5067,7 +5400,7 @@ def format_html(report: Dict) -> str:
             skill_items += (
                 "<li><a href='"
                 f"{escape(link)}'>{escape(repo)}</a>｜"
-                f"星数: <code>{escape(str(it.get('currentStars', '')))}</code>｜7天增量: <code>{escape(str(it.get('delta7d', '')))}</code>｜"
+                f"星数: <code>{escape(str(it.get('currentStars', '')))}</code>｜{escape(_github_delta_label(it))}｜"
                 f"{escape(str(it.get('highlights', it.get('why', ''))))}</li>"
             )
         skill_html.append(
@@ -5137,7 +5470,7 @@ def format_html(report: Dict) -> str:
             "<h2 class='main-title'>GitHub 高增长项目深度解读</h2>"
             f"<h3><a href='{escape(deep_dive.get('link', github_repo_link(deep_dive.get('repo', ''))))}'>{escape(deep_dive.get('repo', ''))}</a></h3>"
             f"<p><strong>{escape(_github_deep_dive_recommendation(deep_dive))}</strong></p>"
-            f"<p>关注指标：⭐ {escape(str(deep_dive.get('stars', 0)))} / 7天增量 {escape(str(deep_dive.get('delta7d', 0)))}</p>"
+            f"<p>关注指标：⭐ {escape(str(deep_dive.get('stars', 0)))} / {escape(_github_delta_label(deep_dive))}</p>"
             f"<p><strong>解决问题：</strong>{escape(str(deep_dive.get('problem', '')))}</p>"
             f"<p><strong>解决思路：</strong>{escape(str(deep_dive.get('solution', '')))}</p>"
             f"<p><strong>架构设计：</strong>{escape(str(deep_dive.get('architecture', '')))}</p>"
@@ -5188,7 +5521,7 @@ def format_html(report: Dict) -> str:
             "<section class='card'>"
             "<h2 class='main-title'>GitHub 高增长项目深度解读</h2>"
             f"<h3><a href='{escape(deep_dive.get('link', github_repo_link(deep_dive.get('repo', ''))))}'>{escape(deep_dive.get('repo', ''))}</a></h3>"
-            f"<p>关注指标：⭐ {escape(str(deep_dive.get('stars', 0)))} / 7天增量 {escape(str(deep_dive.get('delta7d', 0)))}</p>"
+            f"<p>关注指标：⭐ {escape(str(deep_dive.get('stars', 0)))} / {escape(_github_delta_label(deep_dive))}</p>"
             f"<p><strong>解决问题：</strong>{escape(str(deep_dive.get('problem', '')))}</p>"
             f"<p><strong>解决思路：</strong>{escape(str(deep_dive.get('solution', '')))}</p>"
             f"<p><strong>架构设计：</strong>{escape(str(deep_dive.get('architecture', '')))}</p>"
@@ -5431,7 +5764,7 @@ def format_markdown(report: Dict) -> str:
         lines.extend(["## GitHub 高增长项目深度解读", ""])
         lines.append(f"- 仓库：[{deep_dive.get('repo', '')}]({deep_dive.get('link', github_repo_link(deep_dive.get('repo', '')) )})")
         lines.append(f"- {_github_deep_dive_recommendation(deep_dive)}")
-        lines.append(f"- 关注指标：⭐ {deep_dive.get('stars', 0)} / 7天增量 {deep_dive.get('delta7d', 0)}")
+        lines.append(f"- 关注指标：⭐ {deep_dive.get('stars', 0)} / {_github_delta_label(deep_dive)}")
         if deep_dive.get("problem"):
             lines.append(f"- 解决问题：{deep_dive.get('problem')}")
         if deep_dive.get("solution"):
@@ -5443,11 +5776,11 @@ def format_markdown(report: Dict) -> str:
     if llm_models:
         lines.extend(["## LLM 模型发布与价格", ""])
         table = _render_markdown_table(
-            ["公司", "档位", "模型", "版本", "发布时间", "输入/百万token", "输出/百万token", "整体/百万token", "升级概述", "来源"],
+            ["公司", "档位", "模型", "版本", "发布时间", "输入/百万token", "输出/百万token", "整体/百万token", "价格校验", "升级概述", "来源"],
             [[
                 item.get("company", ""), item.get("tier", "当前"), item.get("model", ""), item.get("version", ""), item.get("release_date", ""),
                 item.get("input_per_million", ""), item.get("output_per_million", ""), item.get("overall_per_million", ""),
-                item.get("summary", ""), item.get("source", ""),
+                item.get("price_check", ""), item.get("summary", ""), item.get("source", ""),
             ] for item in llm_models],
         )
         lines.extend(table)
@@ -5505,7 +5838,7 @@ def format_markdown(report: Dict) -> str:
                 repo = it.get("repo", "N/A")
                 link = it.get("link", github_repo_link(repo))
                 source = it.get("source", "GitHub")
-                lines.append(f"- [{repo}]({link})｜来源：{source}｜当前星数 `{it.get('currentStars', 0)}`｜7天增量 `{it.get('delta7d', 0)}`｜{it.get('highlights', it.get('why', ''))}")
+                lines.append(f"- [{repo}]({link})｜来源：{source}｜当前星数 `{it.get('currentStars', 0)}`｜{_github_delta_label(it)}｜{it.get('highlights', it.get('why', ''))}")
             lines.append("")
 
     if focused_blocks:
